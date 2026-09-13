@@ -12,7 +12,7 @@ The integrated firmware builds and host tests run without a device. Physical OLE
 - Secure Boot and flash encryption must be disabled; the utility rejects enabled devices.
 - Desktop Chromium browser with Web Serial over HTTPS/localhost, or Python 3.11 and the command-line tool. Close other serial applications before connecting.
 
-Pinned applications: MeshCore `companion-v1.17.1` and Meshtastic `v2.7.26.54e0d8d`. Exact revisions are in [upstream-lock.json](upstream-lock.json).
+Pinned applications: MeshCore `companion-v1.17.0` and Meshtastic `v2.7.26.54e0d8d`. Exact revisions are in [upstream-lock.json](upstream-lock.json).
 
 ## Installation
 

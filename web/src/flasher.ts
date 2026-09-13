@@ -66,7 +66,7 @@ export class UsbDevice implements Device {
     progress: (percent: number) => void,
   ): Promise<UsbDevice> {
     const port = await navigator.serial.requestPort();
-    const transport = new Transport(port, true);
+    const transport = new Transport(port, false);
     const loader = new ESPLoader({
       transport,
       baudrate: 460800,

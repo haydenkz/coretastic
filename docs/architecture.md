@@ -9,7 +9,7 @@ References:
 - [Heltec V4.2 schematic](https://resource.heltec.cn/download/WiFi_LoRa_32_V4/Schematic/WiFi_LoRa_32_V4.2.pdf)
 - [Heltec V4.3 schematic](https://resource.heltec.cn/download/WiFi_LoRa_32_V4/Schematic/HTIT-WB32LAF_V4.3.pdf)
 - [Heltec R8 pin changes](https://github.com/HelTecAutomation/HeltecWiKi/blob/main/docs/devices/open-source-hardware/esp32-series/lora-32/wifi-lora-32-v4_r8_board/wifi-lora-32-v4_r8_board.md)
-- [MeshCore pinned V4 definitions](https://github.com/meshcore-dev/MeshCore/tree/d92964352441e53b93e8667b802e04f6e072b39e/variants/heltec_v4)
+- [MeshCore pinned V4 definitions](https://github.com/meshcore-dev/MeshCore/tree/727fc0512ce08bfd7b499e46daa7fca6eeec730d/variants/heltec_v4)
 - [Meshtastic pinned V4 definitions](https://github.com/meshtastic/firmware/tree/54e0d8d0ab2ff56b3a9ce967e53f79e49af560fb/variants/esp32s3/heltec_v4)
 
 Both applications retain their upstream V4.2/V4.3 RF front-end detection and normal BLE protocols. R8 has different GPIO assignments and is excluded. Hardware MAC and JEDEC flash ID are checked over USB, but PCB revision is a user-confirmed property.
@@ -37,6 +37,8 @@ The OTA slot names are used only for ESP-IDF boot selection. They are separate a
 ## Boot sequence
 
 An erased OTA data partition boots the factory selector. The selector reads `selector_nvs/boot/selected`, debounces PRG, and displays a five-second countdown. It verifies the chosen image through `esp_ota_set_boot_partition`, commits the choice in its own NVS, then reboots.
+
+Before using the buttons/display, the selector releases retained pad holds on PRG, OLED power/reset, radio PA power, chip select, and IRQ. It holds the RF PA off and chip select inactive during selection. This prevents an upstream deep-sleep hold from persisting through the selector’s software reboot.
 
 A link wrapper around each upstream `app_main` restores the factory boot target before calling Arduino startup. Its temporary boot-metadata write permission is closed before starting the application. Later firmware reset, factory reset, or watchdog restart therefore normally returns to the selector. This also means a deep-sleep wake passes through the selector after an application has initialized; low-power behavior has not been measured.
 

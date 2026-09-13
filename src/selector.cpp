@@ -1,4 +1,5 @@
 #include "driver/gpio.h"
+#include "driver/rtc_io.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
 #include "esp_system.h"
@@ -22,6 +23,22 @@ void error(const char *message) {
 }
 } // namespace
 extern "C" void app_main() {
+  // Upstream deep sleep can retain pad holds. The selector's software reboot
+  // hides that wake cause from the next application, so release them here.
+  gpio_deep_sleep_hold_dis();
+  const gpio_num_t retained[] = {GPIO_NUM_0,  GPIO_NUM_7,  GPIO_NUM_8,
+                                 GPIO_NUM_14, GPIO_NUM_21, GPIO_NUM_36};
+  for (gpio_num_t pin : retained) {
+    if (rtc_gpio_is_valid_gpio(pin)) {
+      rtc_gpio_hold_dis(pin);
+      rtc_gpio_deinit(pin);
+    }
+    gpio_hold_dis(pin);
+  }
+  gpio_set_direction(GPIO_NUM_7, GPIO_MODE_OUTPUT);
+  gpio_set_level(GPIO_NUM_7, 0); // RF PA off while selecting.
+  gpio_set_direction(GPIO_NUM_8, GPIO_MODE_OUTPUT);
+  gpio_set_level(GPIO_NUM_8, 1); // Radio chip select inactive.
   const esp_err_t display = oled_init();
   ESP_LOGI(tag, "OLED: %s", esp_err_to_name(display));
   gpio_config_t button{};
