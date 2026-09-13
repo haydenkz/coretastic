@@ -11,3 +11,14 @@ Patches apply to disposable `.build/<component>` checkouts in lexical filename o
 The release workflow builds before publishing. It stores one manifest alongside the binaries and publishes the same files under the static flasher's `releases/` directory. Source archives contain the checked-out upstream sources and our patches, the built library sources, web production dependencies, and SDK packages. Linker maps and ELF files are retained separately as build metadata. Run the source-bundle command after all three firmware builds and `npm ci`.
 
 Tag releases only after reviewing the build artifacts and the applicable hardware validation record. GitHub Pages must use the Actions deployment source. The workflow does not automatically create tags or merge dependency updates.
+
+## Building from a source archive
+
+Extract `corresponding-source.tar.gz` into a new directory. Its `bundles/` directory contains clean Git bundles for the project and pinned upstream/submodule histories. Reconstruct the checkout before running the README build commands:
+
+```sh
+python3 coretastic/scripts/restore_git.py --source . --output rebuilt
+cd rebuilt
+```
+
+The archive also includes the resolved firmware libraries, web production packages, and ESP-IDF/Arduino SDK source packages under `dependencies/` and `sdk/`. Normal build commands still download/install pinned build tools and dependencies; this archive is source material, not an offline toolchain installer.

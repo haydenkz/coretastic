@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import tarfile
+import tempfile
 from pathlib import Path
 from layout import ROOT, sha
 
@@ -50,6 +51,23 @@ def main():
     inventory = {}
     with tarfile.open(archive, "w:gz", compresslevel=6) as tar:
         tar.add(ROOT, arcname="coretastic", filter=source_filter)
+        # Clean bundles retain commit identities needed by the build/version checks,
+        # without copying local Git config, credentials, hooks, or reflogs.
+        repositories = {
+            "coretastic": ROOT,
+            "meshcore": ROOT / "meshcore/upstream",
+            "meshtastic": ROOT / "meshtastic/upstream",
+            "protobufs": ROOT / "meshtastic/upstream/protobufs",
+            "meshtestic": ROOT / "meshtastic/upstream/meshtestic",
+        }
+        with tempfile.TemporaryDirectory(prefix="coretastic-source-") as temporary:
+            for name, repository in repositories.items():
+                bundle = Path(temporary) / f"{name}.bundle"
+                subprocess.run(
+                    ["git", "bundle", "create", str(bundle), "HEAD"], cwd=repository, check=True
+                )
+                subprocess.run(["git", "bundle", "verify", str(bundle)], cwd=repository, check=True)
+                tar.add(bundle, arcname=f"bundles/{name}.bundle")
         for component in ["meshcore", "meshtastic"]:
             deps = ROOT / ".build" / component / ".pio/libdeps" / f"coretastic-{component}"
             if not deps.is_dir():
