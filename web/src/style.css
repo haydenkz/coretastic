@@ -1,0 +1,65 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Native controls follow the active theme. */
+:root {
+  color-scheme: light;
+}
+html.dark {
+  color-scheme: dark;
+}
+
+/* White-on-transparent logo: invert in the light theme so it stays visible. */
+html:not(.dark) img.logo {
+  filter: invert(1);
+}
+
+/* Status line: color is supplementary to the message text. */
+#status.working {
+  color: #b45309; /* amber-700 */
+}
+#status.success {
+  color: #15803d; /* green-700 */
+}
+#status.error {
+  color: #b91c1c; /* red-700 */
+}
+html.dark #status.working {
+  color: #fbbf24; /* amber-400 */
+}
+html.dark #status.success {
+  color: #4ade80; /* green-400 */
+}
+html.dark #status.error {
+  color: #f87171; /* red-400 */
+}
+
+/* Tracked, rounded progress bar. */
+progress {
+  height: 0.5rem;
+  border-radius: 9999px;
+  overflow: hidden;
+  background: #e5e7eb; /* gray-200 */
+}
+progress::-webkit-progress-bar {
+  background: #e5e7eb;
+}
+progress::-webkit-progress-value {
+  background: #2563eb; /* blue-600 */
+}
+progress::-moz-progress-bar {
+  background: #2563eb;
+}
+html.dark progress {
+  background: #374151; /* gray-700 */
+}
+html.dark progress::-webkit-progress-bar {
+  background: #374151;
+}
+html.dark progress::-webkit-progress-value {
+  background: #3b82f6; /* blue-500 */
+}
+html.dark progress::-moz-progress-bar {
+  background: #3b82f6;
+}

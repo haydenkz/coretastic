@@ -1,0 +1,14 @@
+{
+  "meshcore": {
+    "version": "companion-v1.17.0",
+    "commit": "727fc0512ce08bfd7b499e46daa7fca6eeec730d",
+    "repository": "https://github.com/meshcore-dev/MeshCore.git",
+    "environment": "coretastic-meshcore"
+  },
+  "meshtastic": {
+    "version": "v2.7.26.54e0d8d",
+    "commit": "54e0d8d0ab2ff56b3a9ce967e53f79e49af560fb",
+    "repository": "https://github.com/meshtastic/firmware.git",
+    "environment": "coretastic-meshtastic"
+  }
+}

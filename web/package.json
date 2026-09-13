@@ -1,0 +1,28 @@
+{
+  "name": "coretastic-flasher",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc --noEmit && vite build",
+    "test": "vitest run",
+    "lint": "tsc --noEmit",
+    "format": "prettier --write src tests *.ts index.html package.json tsconfig.json",
+    "format:check": "prettier --check src tests *.ts index.html package.json tsconfig.json",
+    "test:release": "vitest run --config release.config.ts"
+  },
+  "dependencies": {
+    "@noble/hashes": "2.0.1",
+    "esptool-js": "0.6.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "4.3.3",
+    "@types/w3c-web-serial": "1.0.8",
+    "prettier": "3.8.1",
+    "tailwindcss": "4.3.3",
+    "typescript": "7.0.2",
+    "vite": "8.3.0",
+    "vitest": "5.0.0"
+  }
+}

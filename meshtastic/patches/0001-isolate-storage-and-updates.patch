@@ -1,0 +1,26 @@
+diff --git a/src/FSCommon.h b/src/FSCommon.h
+index c85c07962..686c615d8 100644
+--- a/src/FSCommon.h
++++ b/src/FSCommon.h
+@@ -35,7 +35,7 @@ using namespace STM32_LittleFS_Namespace;
+ // ESP32 version
+ #include "LittleFS.h"
+ #define FSCom LittleFS
+-#define FSBegin() FSCom.begin(true) // format on failure
++#define FSBegin() FSCom.begin(true, "/littlefs", 10, "mt_fs") // format only our filesystem
+ #define FILE_O_WRITE "w"
+ #define FILE_O_READ "r"
+ #endif
+diff --git a/src/platform/esp32/MeshtasticOTA.cpp b/src/platform/esp32/MeshtasticOTA.cpp
+index 20a3c59cc..8a61bdd1f 100644
+--- a/src/platform/esp32/MeshtasticOTA.cpp
++++ b/src/platform/esp32/MeshtasticOTA.cpp
+@@ -63,7 +63,7 @@ void saveConfig(meshtastic_Config_NetworkConfig *network, meshtastic_OTAMode met
+ 
+ const esp_partition_t *getAppPartition()
+ {
+-    return esp_partition_find_first(ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_APP_OTA_1, NULL);
++    return nullptr; // Coretastic component updates use the USB flasher.
+ }
+ 
+ bool getAppDesc(const esp_partition_t *part, esp_app_desc_t *app_desc)

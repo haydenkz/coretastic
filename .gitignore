@@ -1,0 +1,17 @@
+.build/
+.cache/
+.venv/
+.pio/
+build/
+sdkconfig
+sdkconfig.old
+sdkconfig.*.old
+__pycache__/
+*.pyc
+web/node_modules/
+web/dist/
+web/public/releases/
+release/
+sdkconfig.selector
+coretastic-*.log
+*.ctbackup

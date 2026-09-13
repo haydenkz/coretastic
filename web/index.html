@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Coretastic USB flasher</title>
+    <script>
+      try {
+        if (localStorage.getItem("coretastic-theme") === "light")
+          document.documentElement.classList.remove("dark");
+      } catch {}
+    </script>
+  </head>
+  <body
+    class="min-h-screen bg-gray-100 text-gray-900 antialiased dark:bg-gray-950 dark:text-gray-100"
+  >
+    <div class="mx-auto max-w-2xl px-4 py-8 sm:py-12">
+      <header class="relative mb-8 text-center">
+        <button
+          id="theme"
+          type="button"
+          aria-label="Toggle dark mode"
+          class="absolute right-0 top-0 rounded-md p-2 text-gray-500 hover:bg-gray-200 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            class="h-5 w-5 dark:hidden"
+          >
+            <circle cx="12" cy="12" r="4"></circle>
+            <path
+              d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"
+            ></path>
+          </svg>
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            class="hidden h-5 w-5 dark:block"
+          >
+            <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"></path>
+          </svg>
+        </button>
+        <img
+          src="./src/assets/CORETASTIC.png"
+          alt="Coretastic"
+          class="logo mx-auto h-12 w-auto sm:h-16"
+        />
+        <h1 class="sr-only">Coretastic USB flasher</h1>
+        <p class="mt-4 text-sm text-gray-600 dark:text-gray-400">
+          Heltec WiFi LoRa 32 V4.2 / V4.3 OLED · 16 MiB flash · MeshCore BLE
+          Companion &amp; Meshtastic
+        </p>
+      </header>
+
+      <p id="support" hidden role="alert"></p>
+      <p
+        id="release"
+        class="mb-4 text-center text-xs text-gray-500 dark:text-gray-400"
+      >
+        Loading release manifest…
+      </p>
+
+      <ol class="space-y-4">
+        <li
+          class="rounded-xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-gray-900"
+        >
+          <div class="mb-3 flex items-center gap-2">
+            <span
+              class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-blue-600 text-xs font-semibold text-white"
+              >1</span
+            >
+            <h2 class="text-sm font-semibold text-gray-900 dark:text-gray-100">
+              Board
+            </h2>
+          </div>
+          <label
+            class="flex items-start gap-3 text-sm font-medium text-gray-700 dark:text-gray-300"
+          >
+            <input
+              id="board"
+              type="checkbox"
+              value="heltec-v4-oled"
+              class="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-800"
+            />
+            <span>Heltec WiFi LoRa 32 V4.2/V4.3 OLED</span>
+          </label>
+        </li>
+
+        <li
+          class="rounded-xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-gray-900"
+        >
+          <div class="mb-3 flex items-center gap-2">
+            <span
+              class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-blue-600 text-xs font-semibold text-white"
+              >2</span
+            >
+            <h2 class="text-sm font-semibold text-gray-900 dark:text-gray-100">
+              Connect
+            </h2>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <button
+              id="connect"
+              class="rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Connect USB
+            </button>
+            <button
+              id="disconnect"
+              disabled
+              class="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+            >
+              Disconnect
+            </button>
+          </div>
+          <p id="status" role="status" aria-live="polite" class="mt-2 text-sm">
+            Not connected.
+          </p>
+          <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
+            For ROM recovery: hold PRG, press and release RESET, then release
+            PRG. Use a USB data cable and close other serial applications.
+          </p>
+        </li>
+
+        <li
+          class="rounded-xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-gray-900"
+        >
+          <div class="mb-3 flex items-center gap-2">
+            <span
+              class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-blue-600 text-xs font-semibold text-white"
+              >3</span
+            >
+            <h2
+              id="operation-title"
+              class="text-sm font-semibold text-gray-900 dark:text-gray-100"
+            >
+              Install Coretastic
+            </h2>
+          </div>
+          <fieldset aria-label="Action" class="grid grid-cols-3 gap-2">
+            <label
+              class="flex cursor-pointer justify-center rounded-md border border-gray-300 px-3 py-2 text-sm font-medium has-checked:border-blue-500 has-checked:bg-blue-50 dark:border-gray-700 dark:has-checked:bg-blue-950"
+            >
+              <input
+                class="sr-only"
+                type="radio"
+                name="mode"
+                value="install"
+                checked
+              />
+              Install
+            </label>
+            <label
+              class="flex cursor-pointer justify-center rounded-md border border-gray-300 px-3 py-2 text-sm font-medium has-checked:border-blue-500 has-checked:bg-blue-50 dark:border-gray-700 dark:has-checked:bg-blue-950"
+            >
+              <input class="sr-only" type="radio" name="mode" value="update" />
+              Update
+            </label>
+            <label
+              class="flex cursor-pointer justify-center rounded-md border border-gray-300 px-3 py-2 text-sm font-medium has-checked:border-blue-500 has-checked:bg-blue-50 dark:border-gray-700 dark:has-checked:bg-blue-950"
+            >
+              <input class="sr-only" type="radio" name="mode" value="backup" />
+              Backup
+            </label>
+          </fieldset>
+          <label id="update-field" hidden class="mt-3 block">
+            <span class="sr-only">Update target</span>
+            <select
+              id="update-operation"
+              class="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
+            >
+              <option value="meshcore">MeshCore</option>
+              <option value="meshtastic">Meshtastic</option>
+              <option value="selector">Boot menu</option>
+              <option value="recovery">Repair boot files</option>
+            </select>
+          </label>
+          <label id="backup-action-field" hidden class="mt-3 block">
+            <span class="sr-only">Backup action</span>
+            <select
+              id="backup-operation"
+              class="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
+            >
+              <option value="backup">Download backup</option>
+              <option value="restore">Restore backup</option>
+            </select>
+          </label>
+          <p
+            id="description"
+            class="mt-2 text-xs text-gray-500 dark:text-gray-400"
+          ></p>
+
+          <label id="restore-field" hidden class="mt-3 block">
+            <span class="text-sm font-medium text-gray-700 dark:text-gray-300"
+              >Backup file</span
+            >
+            <input
+              id="backup-file"
+              type="file"
+              accept=".ctbackup"
+              class="mt-1.5 block w-full text-sm text-gray-600 file:mr-3 file:rounded-md file:border-0 file:bg-blue-50 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-blue-700 hover:file:bg-blue-100 dark:text-gray-400 dark:file:bg-blue-950 dark:file:text-blue-300 dark:hover:file:bg-blue-900"
+            />
+          </label>
+          <label
+            id="erase-field"
+            hidden
+            class="mt-3 flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300"
+          >
+            <input
+              id="confirmation"
+              type="checkbox"
+              class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-800"
+            />
+            Erase existing settings
+          </label>
+
+          <button
+            id="run"
+            disabled
+            class="mt-4 w-full rounded-md bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Install Coretastic
+          </button>
+          <p
+            id="hint"
+            role="status"
+            aria-live="polite"
+            class="mt-2 text-xs text-gray-500 dark:text-gray-400"
+          ></p>
+
+          <div id="progress-field" hidden class="mt-3 flex items-center gap-3">
+            <progress
+              id="progress"
+              max="100"
+              value="0"
+              aria-label="Operation progress"
+              class="flex-1"
+            ></progress>
+            <span
+              id="progress-text"
+              aria-hidden="true"
+              class="w-10 text-right font-mono text-xs tabular-nums text-gray-600 dark:text-gray-400"
+              >0%</span
+            >
+          </div>
+        </li>
+
+        <li
+          class="rounded-xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-gray-900"
+        >
+          <div class="mb-3 flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <span
+                class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-blue-600 text-xs font-semibold text-white"
+                >4</span
+              >
+              <h2
+                class="text-sm font-semibold text-gray-900 dark:text-gray-100"
+              >
+                Log
+              </h2>
+            </div>
+            <button
+              id="logs"
+              class="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+            >
+              Download log
+            </button>
+          </div>
+          <pre
+            id="log"
+            aria-label="USB log"
+            class="h-48 overflow-auto rounded-md bg-gray-900 p-3 text-xs leading-relaxed text-gray-100 dark:bg-black"
+          ></pre>
+        </li>
+      </ol>
+
+      <footer class="mt-6 space-y-2 text-xs text-gray-500 dark:text-gray-400">
+        <p>
+          Backups stay in your browser and contain private keys, contacts, and
+          Bluetooth credentials. Keep them private. After flashing, disconnect
+          and press RESET with PRG released.
+        </p>
+        <p>
+          <a
+            href="https://github.com/haydenkz/coretastic"
+            class="text-blue-600 hover:underline dark:text-blue-400"
+            >Source, build instructions, and recovery documentation</a
+          >
+        </p>
+      </footer>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
