@@ -13,7 +13,7 @@
     "test:release": "vitest run --config release.config.ts"
   },
   "dependencies": {
-    "@noble/hashes": "2.0.1",
+    "@noble/hashes": "2.4.0",
     "esptool-js": "0.6.1"
   },
   "devDependencies": {
