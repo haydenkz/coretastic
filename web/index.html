@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Coretastic USB flasher</title>
+  </head>
+  <body>
+    <main>
+      <h1>Coretastic USB flasher</h1>
+      <p>
+        Heltec WiFi LoRa 32 V4.2 / V4.3 OLED, 16 MiB flash. MeshCore BLE
+        Companion and Meshtastic.
+      </p>
+      <p id="support" role="status"></p>
+      <p id="release">Loading release manifest…</p>
+      <label
+        >Board marking
+        <select id="board">
+          <option value="">Select after checking your board</option>
+          <option value="heltec-v4.2-oled">V4.2 OLED</option>
+          <option value="heltec-v4.3-oled">V4.3 OLED</option>
+        </select></label
+      >
+      <p>
+        V3, V4 R8, and TFT boards are incompatible. USB identifies the chip and
+        flash capacity, but cannot verify the board marking.
+      </p>
+      <button id="connect">Connect USB</button>
+      <button id="disconnect" disabled>Disconnect</button>
+      <p>
+        For ROM recovery: hold PRG, press and release RESET, then release PRG.
+        Use a USB data cable and close other serial applications.
+      </p>
+      <label
+        >Operation
+        <select id="operation">
+          <option value="meshcore">Update MeshCore — preserve settings</option>
+          <option value="meshtastic">
+            Update Meshtastic — preserve settings
+          </option>
+          <option value="selector">Update selector — preserve settings</option>
+          <option value="recovery">
+            Recover selector and bootloader — preserve settings
+          </option>
+          <option value="install">
+            Complete installation — erase all settings
+          </option>
+          <option value="backup">Download full local backup</option>
+          <option value="restore">
+            Restore local backup — overwrite all flash
+          </option>
+        </select></label
+      >
+      <p id="description"></p>
+      <label id="restore-field" hidden
+        >Backup file <input id="backup-file" type="file" accept=".ctbackup"
+      /></label>
+      <label id="erase-field" hidden
+        >Type ERASE to confirm data loss
+        <input id="confirmation" autocomplete="off"
+      /></label>
+      <button id="run" disabled>Run operation</button>
+      <progress
+        id="progress"
+        max="100"
+        value="0"
+        aria-label="Operation progress"
+      ></progress>
+      <p id="status" role="status" aria-live="polite">Not connected.</p>
+      <button id="logs">Download log</button>
+      <pre id="log" aria-label="USB log"></pre>
+      <p>
+        Backups stay in your browser and contain private keys, contacts, and
+        Bluetooth credentials. Keep them private. After flashing, disconnect and
+        press RESET with PRG released.
+      </p>
+      <p>
+        <a href="https://github.com/haydenkz/coretastic"
+          >Source, build instructions, and recovery documentation</a
+        >
+      </p>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
