@@ -10,7 +10,8 @@ ROOT = Path(__file__).resolve().parents[1]
 FLASH_SIZE = 0x1000000
 SECTOR = 0x1000
 LAYOUT_ID = "heltec-v4-dual-v1"
-BOARDS = ["heltec-v4.2-oled", "heltec-v4.3-oled"]
+BOARD = "heltec-v4-oled"
+BOARDS = [BOARD]
 
 
 def partitions(path=ROOT / "partitions.csv"):

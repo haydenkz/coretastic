@@ -4,7 +4,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from flash import execute, make_backup, plan, read_backup
-from layout import BOARDS, FLASH_SIZE, partition_binary
+from layout import BOARD, BOARDS, FLASH_SIZE, partition_binary
 from test_layout import manifest_fixture
 
 
@@ -87,13 +87,15 @@ class FlashTests(unittest.TestCase):
     def test_backup_identity_and_integrity(self):
         flash = bytearray(b"\xff" * FLASH_SIZE)
         flash[0x8000:0x9000] = partition_binary()
-        saved = make_backup(flash, "aa:bb:cc:dd:ee:ff", BOARDS[0])
-        self.assertEqual(read_backup(saved, "aa:bb:cc:dd:ee:ff", BOARDS[0]), flash)
+        saved = make_backup(flash, "aa:bb:cc:dd:ee:ff", BOARD)
+        self.assertEqual(read_backup(saved, "aa:bb:cc:dd:ee:ff", BOARD), flash)
+        legacy = make_backup(flash, "aa:bb:cc:dd:ee:ff", "heltec-v4.2-oled")
+        self.assertEqual(read_backup(legacy, "aa:bb:cc:dd:ee:ff", BOARD), flash)
         with self.assertRaises(ValueError):
-            read_backup(saved, "00:00:00:00:00:00", BOARDS[0])
+            read_backup(saved, "00:00:00:00:00:00", BOARD)
         with self.assertRaises(ValueError):
-            read_backup(saved[:-1], "aa:bb:cc:dd:ee:ff", BOARDS[0])
+            read_backup(saved[:-1], "aa:bb:cc:dd:ee:ff", BOARD)
         broken = bytearray(saved)
         broken[4097] ^= 1
         with self.assertRaises(ValueError):
-            read_backup(broken, "aa:bb:cc:dd:ee:ff", BOARDS[0])
+            read_backup(broken, "aa:bb:cc:dd:ee:ff", BOARD)

@@ -12,7 +12,7 @@ References:
 - [MeshCore pinned V4 definitions](https://github.com/meshcore-dev/MeshCore/tree/727fc0512ce08bfd7b499e46daa7fca6eeec730d/variants/heltec_v4)
 - [Meshtastic pinned V4 definitions](https://github.com/meshtastic/firmware/tree/54e0d8d0ab2ff56b3a9ce967e53f79e49af560fb/variants/esp32s3/heltec_v4)
 
-Both applications retain their upstream V4.2/V4.3 RF front-end detection and normal BLE protocols. R8 has different GPIO assignments and is excluded. Hardware MAC and JEDEC flash ID are checked over USB, but PCB revision is a user-confirmed property.
+Both applications use one V4 OLED image for V4.2 and V4.3 and retain upstream runtime detection of their different RF front ends. Normal BLE protocols are unchanged. R8 has different GPIO assignments and is excluded. Hardware MAC and JEDEC flash ID are checked over USB, but the supported board family is a user-confirmed property.
 
 ## Flash layout
 

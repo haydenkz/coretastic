@@ -1,55 +1,65 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Native controls follow the active theme. */
 :root {
-  color-scheme: light dark;
-  font:
-    16px system-ui,
-    sans-serif;
+  color-scheme: light;
 }
-body {
-  margin: 0;
+html.dark {
+  color-scheme: dark;
 }
-main {
-  max-width: 780px;
-  padding: 1.5rem;
-  margin: auto;
+
+/* White-on-transparent logo: invert in the light theme so it stays visible. */
+html:not(.dark) img.logo {
+  filter: invert(1);
 }
-h1 {
-  font-size: 1.5rem;
+
+/* Status line: color is supplementary to the message text. */
+#status.working {
+  color: #b45309; /* amber-700 */
 }
-p {
-  line-height: 1.5;
+#status.success {
+  color: #15803d; /* green-700 */
 }
-label {
-  display: block;
-  margin: 1rem 0;
+#status.error {
+  color: #b91c1c; /* red-700 */
 }
-select,
-input,
-button {
-  font: inherit;
-  padding: 0.5rem;
-  max-width: 100%;
+html.dark #status.working {
+  color: #fbbf24; /* amber-400 */
 }
-select {
-  display: block;
-  margin-top: 0.4rem;
+html.dark #status.success {
+  color: #4ade80; /* green-400 */
 }
-button {
-  margin: 0.25rem 0;
+html.dark #status.error {
+  color: #f87171; /* red-400 */
 }
+
+/* Tracked, rounded progress bar. */
 progress {
-  display: block;
-  width: 100%;
-  margin-top: 1rem;
+  height: 0.5rem;
+  border-radius: 9999px;
+  overflow: hidden;
+  background: #e5e7eb; /* gray-200 */
 }
-pre {
-  height: 14rem;
-  overflow: auto;
-  padding: 0.8rem;
-  border: 1px solid #888;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  font-size: 0.8rem;
+progress::-webkit-progress-bar {
+  background: #e5e7eb;
 }
-[hidden] {
-  display: none !important;
+progress::-webkit-progress-value {
+  background: #2563eb; /* blue-600 */
+}
+progress::-moz-progress-bar {
+  background: #2563eb;
+}
+html.dark progress {
+  background: #374151; /* gray-700 */
+}
+html.dark progress::-webkit-progress-bar {
+  background: #374151;
+}
+html.dark progress::-webkit-progress-value {
+  background: #3b82f6; /* blue-500 */
+}
+html.dark progress::-moz-progress-bar {
+  background: #3b82f6;
 }

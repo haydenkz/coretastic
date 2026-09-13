@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { sha256 } from "@noble/hashes/sha2.js";
 import {
+  BOARD,
   BOARDS,
   FLASH_SIZE,
   LAYOUT,
@@ -125,15 +126,17 @@ describe("flash contract", () => {
   it("binds backups to the original device, board, layout, and content", () => {
     const flash = new Uint8Array(FLASH_SIZE).fill(255);
     flash.set(partitionBinary(), 0x8000);
-    const saved = backup(flash, "aa:bb:cc:dd:ee:ff", BOARDS[0]);
-    expect(restoreBackup(saved, "aa:bb:cc:dd:ee:ff", BOARDS[0]).length).toBe(
+    const saved = backup(flash, "aa:bb:cc:dd:ee:ff", BOARD);
+    expect(restoreBackup(saved, "aa:bb:cc:dd:ee:ff", BOARD).length).toBe(
       FLASH_SIZE,
     );
-    expect(() =>
-      restoreBackup(saved, "00:00:00:00:00:00", BOARDS[0]),
-    ).toThrow();
+    const legacy = backup(flash, "aa:bb:cc:dd:ee:ff", "heltec-v4.2-oled");
+    expect(restoreBackup(legacy, "aa:bb:cc:dd:ee:ff", BOARD).length).toBe(
+      FLASH_SIZE,
+    );
+    expect(() => restoreBackup(saved, "00:00:00:00:00:00", BOARD)).toThrow();
     saved[8000] ^= 1;
-    expect(() => restoreBackup(saved, "aa:bb:cc:dd:ee:ff", BOARDS[0])).toThrow(
+    expect(() => restoreBackup(saved, "aa:bb:cc:dd:ee:ff", BOARD)).toThrow(
       "checksum",
     );
   });

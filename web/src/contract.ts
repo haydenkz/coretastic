@@ -5,7 +5,8 @@ import { bytesToHex } from "@noble/hashes/utils.js";
 
 export const FLASH_SIZE = 0x1000000;
 export const LAYOUT = "heltec-v4-dual-v1";
-export const BOARDS = ["heltec-v4.2-oled", "heltec-v4.3-oled"];
+export const BOARD = "heltec-v4-oled";
+export const BOARDS = [BOARD];
 export const partitions = csv
   .split("\n")
   .filter((x) => x && !x.startsWith("#"))
@@ -38,6 +39,11 @@ export interface Manifest {
   images: Record<ImageName, Image>;
   upstream: Record<string, { version: string; commit: string }>;
 }
+const COMPATIBLE_BACKUP_BOARDS: Record<string, true> = {
+  [BOARD]: true,
+  "heltec-v4.2-oled": true,
+  "heltec-v4.3-oled": true,
+};
 export function requireCondition(
   condition: unknown,
   message: string,
@@ -225,7 +231,8 @@ export function restoreBackup(
   requireCondition(
     meta.format === "coretastic-backup-v1" &&
       meta.mac.toLowerCase() === mac.toLowerCase() &&
-      meta.board === board &&
+      COMPATIBLE_BACKUP_BOARDS[meta.board] === true &&
+      COMPATIBLE_BACKUP_BOARDS[board] === true &&
       meta.size === FLASH_SIZE,
     "Backup belongs to another board or has incompatible metadata.",
   );

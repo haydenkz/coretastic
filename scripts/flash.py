@@ -10,6 +10,8 @@ from pathlib import Path
 
 from layout import BOARDS, FLASH_SIZE, load_manifest, partition_binary, sha
 
+COMPATIBLE_BACKUP_BOARDS = {*BOARDS, "heltec-v4.2-oled", "heltec-v4.3-oled"}
+
 
 def make_backup(data, mac, board):
     if len(data) != FLASH_SIZE:
@@ -28,7 +30,8 @@ def read_backup(data, mac, board):
     if (
         meta.get("format") != "coretastic-backup-v1"
         or meta.get("mac", "").lower() != mac.lower()
-        or meta.get("board") != board
+        or meta.get("board") not in COMPATIBLE_BACKUP_BOARDS
+        or board not in COMPATIBLE_BACKUP_BOARDS
         or meta.get("size") != FLASH_SIZE
         or meta.get("sha256") != sha(flash)
     ):
@@ -171,7 +174,7 @@ def main():
         "--board",
         required=True,
         choices=BOARDS,
-        help="Confirm the physical OLED board marking; R8/TFT/V3 are unsupported",
+        help="Confirm a Heltec V4.2/V4.3 OLED; R8/TFT/V3 are unsupported",
     )
     parser.add_argument("--manifest", type=Path, default=Path("release/manifest.json"))
     parser.add_argument("--file", type=Path)
