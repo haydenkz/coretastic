@@ -33,7 +33,7 @@ semantic-version==2.10.0
 six==1.17.0
 starlette==0.46.2
 tabulate==0.10.0
-tibs==0.5.7
+tibs==2.0.1
 typing_extensions==4.16.0
 urllib3==2.7.0
 uvicorn==0.34.3
