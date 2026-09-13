@@ -48,7 +48,7 @@ The bootloader and selector use ESP-IDF 4.4.7. Both applications use Arduino-ESP
 
 ## Isolation and updates
 
-Shared link wrappers redirect default NVS initialization, open, erase, and deinitialization to `mc_nvs` or `mt_nvs`. Explicit access to the other NVS partition is rejected. This includes SDK Bluetooth bond storage and upstream factory-reset calls. Filesystem mounts are explicitly labelled; formatting follows the same mounted partition.
+Shared link wrappers redirect default NVS initialization, statistics, open, erase, and deinitialization to `mc_nvs` or `mt_nvs`. Explicit access to the other NVS partition is rejected. This includes SDK Bluetooth bond storage and upstream factory-reset calls. The wrappers are compiled without LTO and with four-byte function alignment because Xtensa `call8` targets must be aligned and LTO does not preserve the source-level alignment attribute.
 
 The wrappers restrict public ESP flash and legacy Arduino SPI flash write/erase entry points to the calling application's NVS/filesystem ranges. Full-chip erase and encrypted writes are rejected. An upstream OTA begin or boot-target change returns an error. Meshtastic's OTA loader lookup returns no partition, so the app's existing OTA capability check declines the request. MeshCore Wi-Fi OTA is disabled at build time. The public boot metadata is writable by an upstream app only during the early selector handoff.
 

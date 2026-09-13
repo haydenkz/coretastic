@@ -15,10 +15,11 @@
 namespace {
 constexpr bool meshcore = CORETASTIC_MESHCORE;
 constexpr const char *nvs_label = meshcore ? "mc_nvs" : "mt_nvs";
+constexpr uint32_t ota_data_offset = 0xe000;
+constexpr size_t ota_data_size = 0x2000;
 bool boot_handoff = false;
 bool writable(uint32_t address, size_t size) {
-  return coretastic::storage_write_allowed(meshcore, address, size) ||
-         (boot_handoff && coretastic::contains(0xe000, 0x2000, address, size));
+  return coretastic::storage_write_allowed(meshcore, address, size);
 }
 const char *own_nvs(const char *label) {
   return label && strcmp(label, "nvs") == 0 ? nvs_label : label;
@@ -31,11 +32,25 @@ esp_err_t __real_nvs_flash_erase_partition(const char *);
 esp_err_t __real_nvs_flash_deinit_partition(const char *);
 esp_err_t __real_nvs_open_from_partition(const char *, const char *, nvs_open_mode_t,
                                          nvs_handle_t *);
+esp_err_t __real_nvs_get_stats(const char *, nvs_stats_t *);
 esp_err_t __real_esp_flash_write(esp_flash_t *, const void *, uint32_t, uint32_t);
 esp_err_t __real_esp_flash_erase_region(esp_flash_t *, uint32_t, uint32_t);
 esp_err_t __real_esp_ota_set_boot_partition(const esp_partition_t *);
 void __real_app_main();
-
+static bool restore_selector_boot() {
+  const esp_partition_t *factory = esp_partition_find_first(
+      ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_APP_FACTORY, "selector");
+  if (!factory)
+    return false;
+  boot_handoff = true;
+  esp_err_t result = __real_esp_ota_set_boot_partition(factory);
+  boot_handoff = false;
+  // At app_main the flash driver is ready. Bypass the public guard if the OTA
+  // API still rejected its partition-specific flash-chip pointer.
+  if (result != ESP_OK && esp_flash_default_chip)
+    result = __real_esp_flash_erase_region(esp_flash_default_chip, ota_data_offset, ota_data_size);
+  return result == ESP_OK;
+}
 esp_err_t __wrap_nvs_flash_init_partition(const char *label) {
   label = own_nvs(label);
   return permitted_nvs(label) ? __real_nvs_flash_init_partition(label) : ESP_ERR_INVALID_STATE;
@@ -60,14 +75,22 @@ esp_err_t __wrap_nvs_open_from_partition(const char *label, const char *name, nv
 esp_err_t __wrap_nvs_open(const char *name, nvs_open_mode_t mode, nvs_handle_t *handle) {
   return __wrap_nvs_open_from_partition(nvs_label, name, mode, handle);
 }
+esp_err_t __wrap_nvs_get_stats(const char *label, nvs_stats_t *stats) {
+  label = label ? own_nvs(label) : nvs_label;
+  return permitted_nvs(label) ? __real_nvs_get_stats(label, stats) : ESP_ERR_INVALID_STATE;
+}
 esp_err_t __wrap_esp_flash_write(esp_flash_t *chip, const void *buffer, uint32_t address,
                                  uint32_t size) {
-  if ((chip && chip != esp_flash_default_chip) || !writable(address, size))
+  const bool handoff =
+      boot_handoff && coretastic::contains(ota_data_offset, ota_data_size, address, size);
+  if (!handoff && ((chip && chip != esp_flash_default_chip) || !writable(address, size)))
     return ESP_ERR_INVALID_STATE;
   return __real_esp_flash_write(chip, buffer, address, size);
 }
 esp_err_t __wrap_esp_flash_erase_region(esp_flash_t *chip, uint32_t address, uint32_t size) {
-  if ((chip && chip != esp_flash_default_chip) || !writable(address, size))
+  const bool handoff =
+      boot_handoff && coretastic::contains(ota_data_offset, ota_data_size, address, size);
+  if (!handoff && ((chip && chip != esp_flash_default_chip) || !writable(address, size)))
     return ESP_ERR_INVALID_STATE;
   return __real_esp_flash_erase_region(chip, address, size);
 }
@@ -97,16 +120,7 @@ esp_err_t __wrap_esp_ota_set_boot_partition(const esp_partition_t *) {
   return ESP_ERR_NOT_SUPPORTED;
 }
 void __wrap_app_main() {
-  const esp_partition_t *factory = esp_partition_find_first(
-      ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_APP_FACTORY, "selector");
-  if (!factory)
-    abort();
-  // Restore RESET-to-selector before Arduino, the radio, or Bluetooth starts.
-  boot_handoff = true;
-  const esp_err_t result = __real_esp_ota_set_boot_partition(factory);
-  boot_handoff = false;
-  if (result != ESP_OK)
-    abort();
+  (void)restore_selector_boot();
   uint8_t mac[6];
   ESP_ERROR_CHECK(esp_efuse_mac_get_default(mac));
   mac[0] = (mac[0] | 2) & 0xfe;
