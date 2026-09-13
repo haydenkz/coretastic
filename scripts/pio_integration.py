@@ -35,3 +35,6 @@ if any("upload" in target for target in COMMAND_LINE_TARGETS):
     raise RuntimeError(
         "Use scripts/flash.py with the release manifest; upstream upload targets are disabled"
     )
+
+if env["PIOENV"] == "coretastic-meshtastic":
+    env.Append(LINKFLAGS=["--specs=nano.specs", "-u", "_printf_float"])

@@ -104,6 +104,7 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: write
+      actions: read
     steps:
       - name: Download verified release artifact
         env:
@@ -125,6 +126,7 @@ jobs:
     needs: [build, publish]
     runs-on: ubuntu-24.04
     permissions:
+      actions: read
       pages: write
       id-token: write
     environment:

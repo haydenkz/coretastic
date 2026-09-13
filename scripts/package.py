@@ -29,6 +29,18 @@ def one(directory, pattern):
 def package(version, output):
     output.mkdir(parents=True, exist_ok=False)
     lock = json.loads((ROOT / "upstream-lock.json").read_text())
+    from prepare import input_digest
+
+    for component, record in lock.items():
+        for directory in [ROOT / component / "upstream", ROOT / ".build" / component]:
+            actual = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=directory, text=True
+            ).strip()
+            if actual != record["commit"]:
+                raise ValueError(f"{directory}: source revision differs from lock")
+        marker = ROOT / ".build" / component / ".coretastic-inputs"
+        if not marker.exists() or marker.read_text() != input_digest(component):
+            raise ValueError(f"{component}: rebuild changed integration inputs before packaging")
     source = {
         "selector": ROOT / ".pio/build/selector/firmware.bin",
         "bootloader": ROOT / ".pio/build/selector/bootloader.bin",

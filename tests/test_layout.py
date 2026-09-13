@@ -56,6 +56,20 @@ def manifest_fixture():
 
 
 class LayoutTests(unittest.TestCase):
+    def test_dependency_locks_match_build_configuration(self):
+        import configparser
+        import json
+
+        root = Path(__file__).resolve().parents[1]
+        for component in ("meshcore", "meshtastic"):
+            config = configparser.ConfigParser(interpolation=None)
+            config.read(root / component / "integration.ini")
+            dependencies = config.get("env:coretastic-" + component, "lib_deps").splitlines()
+            self.assertEqual(
+                [line.strip() for line in dependencies if line.strip()],
+                json.loads((root / component / "dependencies.json").read_text()),
+            )
+
     def test_image_integrity(self):
         data = image_fixture()
         validate_image(data)
