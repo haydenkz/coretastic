@@ -8,8 +8,9 @@
     "build": "tsc --noEmit && vite build",
     "test": "vitest run",
     "lint": "tsc --noEmit",
-    "format": "prettier --write src index.html package.json tsconfig.json",
-    "format:check": "prettier --check src index.html package.json tsconfig.json"
+    "format": "prettier --write src tests *.ts index.html package.json tsconfig.json",
+    "format:check": "prettier --check src tests *.ts index.html package.json tsconfig.json",
+    "test:release": "vitest run --config release.config.ts"
   },
   "dependencies": {
     "@noble/hashes": "2.0.1",

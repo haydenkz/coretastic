@@ -6,14 +6,14 @@ The selector and both integrated applications have been cross-compiled locally. 
 
 Host tests exercise button debouncing, countdown rollover, held-button behavior, full flash-range write guards, NVS routing, startup handoff permissions, OTA rejection, and distinct MAC derivation. Python and browser tests reject corrupted images, changed layouts, out-of-bounds updates, and backups with the wrong device identity or checksum. The browser write-operation tests assert that failed preflight checks issue no writes and that component updates do not erase all flash.
 
-TypeScript checks and Vite production builds run against the pinned esptool-js API. These checks do not emulate an ESP32, Bluetooth controller, OLED, radio, or USB serial device.
+The browser release test validates every actual packaged binary and preflights all write operations through a simulated device. TypeScript checks and Vite production builds run against the pinned esptool-js API. These checks do not emulate an ESP32, Bluetooth controller, OLED, radio, or USB serial device.
 
 ## Hardware and browser status
 
 | Environment | Verified result |
 | --- | --- |
 | Linux development host | Native logic tests, firmware cross-compilation, image validation, browser unit tests and static build |
-| Desktop Chromium USB flashing | Not yet tested on a physical board |
+| Desktop Chrome 152.0.7977.75 on Linux | Flasher DOM loads the release manifest and detects Web Serial; physical USB flashing not tested |
 | Windows/macOS USB flashing | Not yet tested |
 | Android browser USB flashing | No verified configuration; browsers without Web Serial are rejected |
 | Normal MeshCore / Meshtastic Android applications | Protocol code retained; pairing and interoperability not yet device-tested |

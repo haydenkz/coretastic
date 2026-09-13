@@ -79,6 +79,7 @@ npm test --prefix web
 python scripts/build.py all
 python scripts/package.py --version local --output release
 python scripts/validate_release.py release/manifest.json
+npm run test:release --prefix web
 python scripts/source_bundle.py
 mkdir -p web/public/releases
 cp release/*.bin release/manifest.json release/SHA256SUMS web/public/releases/

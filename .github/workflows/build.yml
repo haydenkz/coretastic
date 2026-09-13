@@ -63,6 +63,7 @@ jobs:
         run: |
           python scripts/package.py --version "$RELEASE_VERSION"
           python scripts/validate_release.py release/manifest.json
+          npm run test:release --prefix web
           python scripts/source_bundle.py
       - name: Build matching web flasher
         run: |
