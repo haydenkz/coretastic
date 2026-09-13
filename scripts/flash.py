@@ -79,13 +79,15 @@ def execute(args):
             or esp.get_flash_encryption_enabled()
         ):
             raise ValueError("Secure Boot / encrypted devices are unsupported")
+        # The stub initializes the flash interface; ROM download mode does not.
+        esp = esp.run_stub()
         if (esp.flash_id() >> 16) & 255 != 24:
             raise ValueError("Expected 16 MiB physical flash")
         mac = ":".join(f"{b:02x}" for b in esp.read_mac())
         print(
             f"Validated ESP32-S3, 16 MiB flash, MAC {mac}; physical board confirmation: {args.board}"
         )
-        esp = esp.run_stub()
+        esp.flash_set_parameters(FLASH_SIZE)
         esp.change_baud(460800)
         if args.operation == "backup":
             # Exclusive creation prevents accidental replacement of a previous backup.
