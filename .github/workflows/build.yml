@@ -73,14 +73,14 @@ jobs:
           # /coretastic/ subpath of the default github.io project site.
           npm run build --prefix web -- --base /
       - name: Retain firmware, source, and build metadata
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: firmware-${{ github.sha }}
           path: release/
           if-no-files-found: error
           retention-days: 14
       - name: Retain web build
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: web-${{ github.sha }}
           path: web/dist/
@@ -88,7 +88,7 @@ jobs:
           retention-days: 14
       - name: Retain failure diagnostics
         if: failure()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: failure-diagnostics-${{ github.sha }}
           path: |
