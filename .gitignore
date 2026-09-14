@@ -1,17 +1,25 @@
-.build/
-.cache/
-.venv/
-.pio/
-build/
-sdkconfig
-sdkconfig.old
-sdkconfig.*.old
+# Generated build, dependency, and IDE artifacts (root-scoped)
+/.build/
+/.ruff_cache/
+/.cache/
+/.pio/
+/.venv/
+/sdkconfig
+/sdkconfig.old
+/sdkconfig.*.old
+/sdkconfig.selector
+/release/
+/build/
+
+# Python cache
 __pycache__/
 *.pyc
+
+# Web build output
 web/node_modules/
 web/dist/
 web/public/releases/
-release/
-sdkconfig.selector
+
+# Local runtime artifacts
 coretastic-*.log
 *.ctbackup

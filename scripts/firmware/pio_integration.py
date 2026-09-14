@@ -43,7 +43,7 @@ env.Prepend(LIBS=[coretastic_env.BuildLibrary("$BUILD_DIR/coretastic", "$PROJECT
 # Only the manifest-driven USB flasher may program the integrated device.
 if any("upload" in target for target in COMMAND_LINE_TARGETS):
     raise RuntimeError(
-        "Use scripts/flash.py with the release manifest; upstream upload targets are disabled"
+        "Use scripts/device/flash.py with the release manifest; upstream upload targets are disabled"
     )
 
 if env["PIOENV"] == "coretastic-meshtastic":

@@ -8,7 +8,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 
 
 def run(*args, cwd=ROOT):
@@ -19,8 +19,8 @@ def input_digest(component):
     files = [
         ROOT / "upstream-lock.json",
         ROOT / "partitions.csv",
-        ROOT / "scripts/integration.cpp",
-        ROOT / "scripts/pio_integration.py",
+        ROOT / "scripts/firmware/integration.cpp",
+        ROOT / "scripts/firmware/pio_integration.py",
         ROOT / "include/storage_boundary.h",
         ROOT / component / "integration.ini",
     ]
@@ -52,9 +52,9 @@ def prepare(component):
         run("git", "apply", str(patch), cwd=dest)
     integration = dest / "coretastic"
     integration.mkdir()
-    for source in [ROOT / "scripts/integration.cpp", ROOT / "include/storage_boundary.h"]:
+    for source in [ROOT / "scripts/firmware/integration.cpp", ROOT / "include/storage_boundary.h"]:
         shutil.copy2(source, integration / source.name)
-    shutil.copy2(ROOT / "scripts/pio_integration.py", integration / "build.py")
+    shutil.copy2(ROOT / "scripts/firmware/pio_integration.py", integration / "build.py")
     shutil.copy2(ROOT / "partitions.csv", integration / "partitions.csv")
     with (dest / "platformio.ini").open("a") as config:
         config.write((ROOT / component / "integration.ini").read_text())

@@ -17,7 +17,7 @@ Tag releases only after reviewing the build artifacts and the applicable hardwar
 Extract `corresponding-source.tar.gz` into a new directory. Its `bundles/` directory contains clean Git bundles for the project and pinned upstream/submodule histories. Reconstruct the checkout before running the README build commands:
 
 ```sh
-python3 coretastic/scripts/restore_git.py --source . --output rebuilt
+python3 coretastic/scripts/release/restore_git.py --source . --output rebuilt
 cd rebuilt
 ```
 
