@@ -1,0 +1,7 @@
+cmake_minimum_required(VERSION 3.16)
+set(EXTRA_COMPONENT_DIRS src)
+if(EXISTS "$ENV{IDF_PATH}/components/__pio_env")
+    set(COMPONENTS src __pio_env)
+endif()
+include($ENV{IDF_PATH}/tools/cmake/project.cmake)
+project(coretastic)

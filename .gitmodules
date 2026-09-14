@@ -1,0 +1,6 @@
+[submodule "meshcore/upstream"]
+	path = meshcore/upstream
+	url = https://github.com/meshcore-dev/MeshCore.git
+[submodule "meshtastic/upstream"]
+	path = meshtastic/upstream
+	url = https://github.com/meshtastic/firmware.git
