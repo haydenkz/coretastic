@@ -1,9 +1,10 @@
-[tool.ruff]
 line-length = 100
 exclude = [".build", ".cache", ".venv", "meshcore/upstream", "meshtastic/upstream"]
-[tool.ruff.lint]
+
+[lint]
 select = ["E4", "E7", "E9", "F"]
-[tool.ruff.lint.per-file-ignores]
+
+[lint.per-file-ignores]
 "scripts/firmware/pio_integration.py" = ["F821", "E402"]
 "scripts/device/flash.py" = ["E402"]
 "scripts/firmware/build.py" = ["E402"]
