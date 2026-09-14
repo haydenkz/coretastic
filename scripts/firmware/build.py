@@ -5,6 +5,16 @@ import argparse
 import os
 import subprocess
 import shutil
+import sys
+from pathlib import Path
+
+# firmware/build.py imports prepare; resolve the sibling package for direct
+# invocation as well as package import.
+for _tooling in ["scripts/firmware"]:
+    _tooling_path = Path(__file__).resolve().parents[2] / _tooling
+    if str(_tooling_path) not in sys.path:
+        sys.path.insert(0, str(_tooling_path))
+
 from prepare import ROOT, prepare, input_digest
 
 

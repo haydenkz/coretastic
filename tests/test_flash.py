@@ -2,7 +2,7 @@ import sys
 import unittest
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts" / "device"))
 from flash import execute, make_backup, plan, read_backup
 from layout import BOARD, BOARDS, FLASH_SIZE, partition_binary
 from test_layout import manifest_fixture

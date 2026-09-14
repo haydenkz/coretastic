@@ -44,27 +44,27 @@ jobs:
         run: |
           ruff check scripts tests
           ruff format --check scripts tests
-          clang-format --dry-run --Werror src/*.cpp include/*.h scripts/integration.cpp tests/*.cpp tests/idf_stubs/*.h
+          clang-format --dry-run --Werror src/*.cpp include/*.h scripts/firmware/integration.cpp tests/*.cpp tests/idf_stubs/*.h
           npm run format:check --prefix web
           npm run lint --prefix web
       - name: Host and browser contract tests
         run: |
-          python scripts/test.py
+          python scripts/device/test.py
           npm test --prefix web
       - name: Build selector
-        run: python scripts/build.py selector
+        run: python scripts/firmware/build.py selector
       - name: Build integrated MeshCore BLE Companion
-        run: python scripts/build.py meshcore
+        run: python scripts/firmware/build.py meshcore
       - name: Build integrated Meshtastic
-        run: python scripts/build.py meshtastic
+        run: python scripts/firmware/build.py meshtastic
       - name: Package and validate all firmware
         env:
           RELEASE_VERSION: ${{ github.ref_name }}
         run: |
-          python scripts/package.py --version "$RELEASE_VERSION"
-          python scripts/validate_release.py release/manifest.json
+          python scripts/release/package.py --version "$RELEASE_VERSION"
+          python scripts/release/validate_release.py release/manifest.json
           npm run test:release --prefix web
-          python scripts/source_bundle.py
+          python scripts/release/source_bundle.py
       - name: Build matching web flasher
         run: |
           mkdir -p web/public/releases

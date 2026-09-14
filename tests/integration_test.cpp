@@ -1,4 +1,4 @@
-#include "../scripts/integration.cpp"
+#include "../scripts/firmware/integration.cpp"
 #include "stub.h"
 #include <cassert>
 #include <cstring>

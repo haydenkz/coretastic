@@ -6,7 +6,7 @@ import json
 import struct
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 FLASH_SIZE = 0x1000000
 SECTOR = 0x1000
 LAYOUT_ID = "heltec-v4-dual-v1"

@@ -8,6 +8,13 @@ import sys
 import tempfile
 from pathlib import Path
 
+# device/flash.py imports layout; resolve the sibling package for direct
+# invocation as well as package import.
+for _tooling in ["scripts/device"]:
+    _tooling_path = Path(__file__).resolve().parents[2] / _tooling
+    if str(_tooling_path) not in sys.path:
+        sys.path.insert(0, str(_tooling_path))
+
 from layout import BOARDS, FLASH_SIZE, load_manifest, partition_binary, sha
 
 COMPATIBLE_BACKUP_BOARDS = {*BOARDS, "heltec-v4.2-oled", "heltec-v4.3-oled"}

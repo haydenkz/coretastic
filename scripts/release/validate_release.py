@@ -3,7 +3,16 @@
 
 import argparse
 import re
+import sys
 from pathlib import Path
+
+# Tooling lives in sibling packages under scripts/; resolve them for direct
+# invocation as well as package import.
+for _tooling in ["scripts/device", "scripts/firmware"]:
+    _tooling_path = Path(__file__).resolve().parents[2] / _tooling
+    if str(_tooling_path) not in sys.path:
+        sys.path.insert(0, str(_tooling_path))
+
 from layout import load_manifest
 
 
