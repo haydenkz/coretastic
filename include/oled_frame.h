@@ -1,9 +1,16 @@
 #pragma once
-#include "oled_brand.h"
 #include <cstdint>
 #include <cstring>
 
 namespace coretastic {
+// A one-bit image. Rows are packed most significant bit leftmost and each row is
+// padded to a whole byte, which is how oled_brand.py emits the generated tiles.
+struct Bitmap {
+  uint8_t width;
+  uint8_t height;
+  const uint8_t *bits; // Row-major, most significant bit leftmost.
+};
+
 // Original 5x7 glyphs, columns, bit zero at the top. Only UI characters needed.
 constexpr uint8_t kGlyphs[][5] = {
     {0x7e, 0x11, 0x11, 0x11, 0x7e}, {0x7f, 0x49, 0x49, 0x49, 0x36}, {0x3e, 0x41, 0x41, 0x41, 0x22},

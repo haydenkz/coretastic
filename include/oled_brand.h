@@ -3,15 +3,9 @@
 
 #pragma once
 
-#include <cstdint>
+#include "oled_frame.h"
 
 namespace coretastic {
-
-struct Bitmap {
-  uint8_t width;
-  uint8_t height;
-  const uint8_t *bits; // Row-major, most significant bit leftmost.
-};
 
 // Namespace-scope constexpr keeps these internal to each translation unit,
 // which is all the C++11 firmware toolchain allows for non-inline data.
