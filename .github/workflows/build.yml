@@ -121,10 +121,16 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           tar -czf coretastic-bundle.tar.gz -C release .
-          gh release create "$TAG" --verify-tag --title "Coretastic $TAG" --generate-notes coretastic-bundle.tar.gz release/*.bin release/manifest.json release/SHA256SUMS release/toolchains.json release/corresponding-source.tar.gz
+          # Idempotent: a re-run on an existing tag refreshes its assets instead of
+          # failing, so dispatching a rebuild never blocks on the release.
+          gh release view "$TAG" >/dev/null 2>&1 ||
+            gh release create "$TAG" --verify-tag --title "Coretastic $TAG" --generate-notes
+          gh release upload "$TAG" --clobber coretastic-bundle.tar.gz release/*.bin release/manifest.json release/SHA256SUMS release/toolchains.json release/corresponding-source.tar.gz
   deploy:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [build, publish]
+    # Only build: the page deploy consumes build's github-pages artifact and must
+    # not be blocked by a publish failure on an already-published release.
+    needs: build
     runs-on: ubuntu-24.04
     permissions:
       actions: read
