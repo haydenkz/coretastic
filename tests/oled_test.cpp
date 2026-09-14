@@ -50,8 +50,8 @@ bool has_solid_mark(const Bitmap &bitmap, unsigned columns) {
 
 int main() {
   // The packed layout is MSB-leftmost, byte-padded per row, which oled.cpp replays
-  // verbatim. MeshCore's mark is its wordmark; Meshtastic's is its badge.
-  assert(kMeshcoreMark.width == 96 && kMeshcoreMark.height == 12);
+  // verbatim. Each firmware row is an 18x18 mark followed by its name.
+  assert(kMeshcoreMark.width == 18 && kMeshcoreMark.height == 18);
   assert(kMeshtasticMark.width == 18 && kMeshtasticMark.height == 18);
   assert(kWordmark.width == 128 && kWordmark.height == 13);
   for (const Bitmap *mark : {&kMeshcoreMark, &kMeshtasticMark})
@@ -110,6 +110,40 @@ int main() {
   Frame later;
   coretastic::compose_selector(later, 0, 4);
   assert(std::memcmp(first.pages(), later.pages(), Frame::kPages * Frame::kWidth) != 0);
+
+  // Both rows are named beside their mark, clear of it; the icon alone does not
+  // carry the firmware name, so a dropped label would ship an unlabelled row.
+  for (unsigned row_index = 0; row_index < 2; ++row_index) {
+    const Frame &plain = row_index == 0 ? second : first; // the un-inverted render
+    const unsigned x = 4 + kMeshcoreMark.width + 6;
+    const unsigned y =
+        coretastic::kRowTop + row_index * coretastic::kRowPitch + (coretastic::kRowBand - 7) / 2;
+    unsigned inked = 0;
+    for (unsigned column = 0; column < 11 * Frame::kAdvance; ++column)
+      for (unsigned line = 0; line < 7; ++line)
+        inked += plain.at(x + column, y + line) ? 1 : 0;
+    assert(inked > 0);
+  }
+
+  // The footer is the countdown alone, centered on the panel: no PRG hint at the
+  // left margin, and no ink outside the centered run.
+  const unsigned footer_width = 6 * Frame::kAdvance; // "BOOT N"
+  const unsigned footer_x = (Frame::kWidth - footer_width) / 2;
+  unsigned footer_ink = 0;
+  for (unsigned x = 0; x < Frame::kWidth; ++x)
+    for (unsigned y = coretastic::kFooterTop; y < Frame::kHeight; ++y) {
+      footer_ink += first.at(x, y) ? 1 : 0;
+      if (x < footer_x || x >= footer_x + footer_width)
+        assert(!first.at(x, y));
+    }
+  assert(footer_ink > 0);
+
+  // Selection inverts the whole band, not just the mark: the empty right margin of
+  // the selected row is lit and the same margin of the unselected row is dark.
+  for (unsigned x = 96; x < Frame::kWidth; ++x) {
+    assert(first.at(x, coretastic::kRowTop + 1));
+    assert(!second.at(x, coretastic::kRowTop + 1));
+  }
 
   // The two highlight bands are separated and the footer band is untouched.
   for (unsigned x = 0; x < 128; ++x)

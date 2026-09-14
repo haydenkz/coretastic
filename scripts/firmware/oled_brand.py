@@ -3,9 +3,10 @@
 
 The selector owns a 128x64 one-bit SSD1306. The web flasher already ships the brand
 artwork, so this script re-derives monochrome tiles from those same PNGs instead of
-adding a second copy. Each firmware row carries its own wordmark; Meshtastic ships no
-wordmark, so its row uses the badge with the bolt knocked out. Output is deterministic;
-tests/test_oled_brand.py fails when the committed header drifts from the sources.
+adding a second copy. Each firmware row carries its own mark; MeshCore's is its
+app-icon glyph and Meshtastic's is the badge with the bolt knocked out. Output is
+deterministic; tests/test_oled_brand.py fails when the committed header drifts from
+the sources.
 
     python scripts/firmware/oled_brand.py            # rewrite the header
     python scripts/firmware/oled_brand.py --preview  # also print the tiles as ASCII
@@ -22,7 +23,7 @@ HEADER = ROOT / "include" / "oled_brand.h"
 
 # Ink thresholds per artwork. White-on-transparent wordmarks use alpha coverage; the
 # Meshtastic badge is lit with its dark bolt knocked out of the green field.
-MESHCORE_INK_LEVEL = 0.42
+MESHCORE_ICON_LEVEL = 0.30
 MESHTASTIC_GLYPH_LEVEL = 0.10
 WORDMARK_LEVEL = 0.45
 
@@ -180,10 +181,19 @@ def wordmark_tile(width, height, level):
 
 
 def meshcore_tile(width, height):
-    """The MeshCore wordmark is the firmware's mark."""
-    image = read_png(ASSETS / "meshcore.png")
-    image = crop(image, ink_bounds(image, lambda p: p[3] > 127))
-    return fit(image, width, height, lambda p: p[3] > 127, MESHCORE_INK_LEVEL)
+    """The MeshCore app-icon glyph: a stylized antenna mark on a black field.
+
+    The icon is white ink on black, so ink is the intersection of opacity and
+    luminance; cropping to that box drops the field before the fit. The glyph is
+    mostly hairline at this size, so threshold well below even coverage.
+    """
+    image = read_png(ASSETS / "meshcore-icon.png")
+
+    def ink(pixel):
+        return pixel[3] > 127 and luminance(pixel) > 0.6
+
+    image = crop(image, ink_bounds(image, ink))
+    return fit(image, width, height, ink, MESHCORE_ICON_LEVEL)
 
 
 def meshtastic_tile(width, height):
@@ -208,10 +218,11 @@ TILES = (
 
 def build():
     """Return the ordered (name, width, height, mask) tiles."""
-    # One screen grammar: a full-width Coretastic header and wordmark rows per firmware.
+    # One screen grammar: a full-width Coretastic header, then a mark and a name per
+    # firmware row.
     return [
         ("kWordmark", 128, 13, wordmark_tile(128, 13, WORDMARK_LEVEL)),
-        ("kMeshcoreMark", 96, 12, meshcore_tile(96, 12)),
+        ("kMeshcoreMark", 18, 18, meshcore_tile(18, 18)),
         ("kMeshtasticMark", 18, 18, meshtastic_tile(18, 18)),
     ]
 
