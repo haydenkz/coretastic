@@ -19,6 +19,7 @@ def main():
     run(sys.executable, "-m", "unittest", "discover", "-s", "tests", "-v")
     for test, flags in [
         ("selector", []),
+        ("oled", []),
         ("integration-mc", ["-DCORETASTIC_MESHCORE=1"]),
         ("integration-mt", ["-DCORETASTIC_MESHCORE=0"]),
         (
@@ -26,7 +27,7 @@ def main():
             ["-DCORETASTIC_MESHCORE=0", "-DCORETASTIC_HANDOFF_OTA_FAILURE=1"],
         ),
     ]:
-        source = "selector" if test == "selector" else "integration"
+        source = test.split("-")[0]
         binary = output / test
         run(
             os.environ.get("CXX", "c++"),
