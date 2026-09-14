@@ -69,7 +69,9 @@ jobs:
         run: |
           mkdir -p web/public/releases
           cp release/*.bin release/manifest.json release/SHA256SUMS web/public/releases/
-          npm run build --prefix web -- --base /coretastic/
+          # The flasher serves from the root of coretastic.org, not the
+          # /coretastic/ subpath of the default github.io project site.
+          npm run build --prefix web -- --base /
       - name: Retain firmware, source, and build metadata
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:

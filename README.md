@@ -59,7 +59,7 @@ Keep the flasher and firmware bundle from the **same Coretastic release**. Do no
 
 ## Web flasher
 
-The browser flasher works from HTTPS or localhost with Web Serial. It verifies the installed partition table and bootloader, writes only validated compatible images, and lets you download the full browser log.
+The browser flasher is published at **https://coretastic.org/** and works from HTTPS or localhost with Web Serial. It verifies the installed partition table and bootloader, writes only validated compatible images, and lets you download the full browser log.
 
 ```sh
 npm ci --prefix web
