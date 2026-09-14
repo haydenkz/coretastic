@@ -22,8 +22,16 @@ let device: UsbDevice | undefined,
   busy = false,
   selectedOperation = "install";
 const board = el<HTMLInputElement>("board"),
-  updateOperation = el<HTMLSelectElement>("update-operation"),
-  backupOperation = el<HTMLSelectElement>("backup-operation");
+  updateTargets = [
+    ...document.querySelectorAll<HTMLInputElement>(
+      'input[name="update-target"]',
+    ),
+  ],
+  backupActions = [
+    ...document.querySelectorAll<HTMLInputElement>(
+      'input[name="backup-action"]',
+    ),
+  ];
 const modes = [
   ...document.querySelectorAll<HTMLInputElement>('input[name="mode"]'),
 ];
@@ -91,11 +99,12 @@ function refresh() {
     mode === "install"
       ? "install"
       : mode === "update"
-        ? updateOperation.value
-        : backupOperation.value;
+        ? updateTargets.find((control) => control.checked)!.value
+        : backupActions.find((control) => control.checked)!.value;
   selectedOperation = op;
   el("update-field").hidden = mode !== "update";
   el("backup-action-field").hidden = mode !== "backup";
+  el("install-field").hidden = mode !== "install";
   const destructive = ["install", "restore"].includes(op);
   const restore = op === "restore";
   const restoreFile = el<HTMLInputElement>("backup-file").files?.[0];
@@ -118,8 +127,8 @@ function refresh() {
     (restore && !restoreFile);
   board.disabled = busy || !!device;
   for (const control of modes) control.disabled = busy;
-  updateOperation.disabled = busy;
-  backupOperation.disabled = busy;
+  for (const control of updateTargets) control.disabled = busy;
+  for (const control of backupActions) control.disabled = busy;
   el<HTMLInputElement>("backup-file").disabled = busy;
   hint.textContent =
     !busy && device && needsManifest && !manifest
@@ -223,8 +232,8 @@ function changeOperation() {
   refresh();
 }
 for (const control of modes) control.onchange = changeOperation;
-updateOperation.onchange = changeOperation;
-backupOperation.onchange = changeOperation;
+for (const control of updateTargets) control.onchange = changeOperation;
+for (const control of backupActions) control.onchange = changeOperation;
 el("confirmation").onchange = refresh;
 el("backup-file").onchange = refresh;
 const serialAvailable = isSecureContext && "serial" in navigator;

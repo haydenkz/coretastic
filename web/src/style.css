@@ -14,6 +14,10 @@ html.dark {
 html:not(.dark) img.logo {
   filter: invert(1);
 }
+/* The MeshCore mark is white-on-transparent; its tile is white in both themes. */
+img.logo-meshcore {
+  filter: invert(1);
+}
 
 /* Status line: color is supplementary to the message text. */
 #status.working {
