@@ -10,14 +10,13 @@
 #include "nvs_flash.h"
 #include "oled.h"
 #include "selector_state.h"
-#include <cstdio>
 
 namespace {
 constexpr const char *tag = "selector";
 uint32_t now_ms() { return uint32_t(esp_timer_get_time() / 1000); }
 void error(const char *message) {
   ESP_LOGE(tag, "%s", message);
-  oled_show("BOOT STOPPED", message, "RESET TO RETRY", "USB RECOVERY PRG RST");
+  oled_show_error("BOOT STOPPED", message);
   for (;;)
     vTaskDelay(pdMS_TO_TICKS(1000));
 }
@@ -65,10 +64,7 @@ extern "C" void app_main() {
     if (state.update(gpio_get_level(GPIO_NUM_0) == 0, now))
       break;
     if (uint32_t(now - drawn) >= 100) {
-      char countdown[32];
-      snprintf(countdown, sizeof(countdown), "PRG CHANGE  BOOT %u", state.seconds(now));
-      oled_show("CORETASTIC", state.selection() == 0 ? "> MESHCORE" : "  MESHCORE",
-                state.selection() == 1 ? "> MESHTASTIC" : "  MESHTASTIC", countdown);
+      oled_show_selector(state.selection(), state.seconds(now));
       drawn = now;
     }
     vTaskDelay(pdMS_TO_TICKS(10));
@@ -85,6 +81,6 @@ extern "C" void app_main() {
     error("NVS SAVE ERROR");
   nvs_close(nvs);
   ESP_LOGI(tag, "Rebooting into %s", label);
-  oled_show("BOOTING", label, "", "");
+  oled_show_boot(state.selection());
   esp_restart();
 }

@@ -3,30 +3,29 @@
 #include "driver/i2c.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include <cstdint>
+#include "oled_screen.h"
 #include <cstring>
 
 namespace {
 constexpr i2c_port_t port = I2C_NUM_0;
-// Original 5x7 glyphs, columns, bit zero at the top. Only UI characters needed.
-constexpr uint8_t glyphs[][5] = {
-    {0x7e, 0x11, 0x11, 0x11, 0x7e}, {0x7f, 0x49, 0x49, 0x49, 0x36}, {0x3e, 0x41, 0x41, 0x41, 0x22},
-    {0x7f, 0x41, 0x41, 0x22, 0x1c}, {0x7f, 0x49, 0x49, 0x49, 0x41}, {0x7f, 0x09, 0x09, 0x09, 0x01},
-    {0x3e, 0x41, 0x49, 0x49, 0x3a}, {0x7f, 0x08, 0x08, 0x08, 0x7f}, {0, 0x41, 0x7f, 0x41, 0},
-    {0x20, 0x40, 0x41, 0x3f, 0x01}, {0x7f, 0x08, 0x14, 0x22, 0x41}, {0x7f, 0x40, 0x40, 0x40, 0x40},
-    {0x7f, 0x02, 0x0c, 0x02, 0x7f}, {0x7f, 0x04, 0x08, 0x10, 0x7f}, {0x3e, 0x41, 0x41, 0x41, 0x3e},
-    {0x7f, 0x09, 0x09, 0x09, 0x06}, {0x3e, 0x41, 0x51, 0x21, 0x5e}, {0x7f, 0x09, 0x19, 0x29, 0x46},
-    {0x26, 0x49, 0x49, 0x49, 0x32}, {0x01, 0x01, 0x7f, 0x01, 0x01}, {0x3f, 0x40, 0x40, 0x40, 0x3f},
-    {0x1f, 0x20, 0x40, 0x20, 0x1f}, {0x3f, 0x40, 0x30, 0x40, 0x3f}, {0x63, 0x14, 0x08, 0x14, 0x63},
-    {0x07, 0x08, 0x70, 0x08, 0x07}, {0x61, 0x51, 0x49, 0x45, 0x43}, {0x3e, 0x51, 0x49, 0x45, 0x3e},
-    {0, 0x42, 0x7f, 0x40, 0},       {0x62, 0x51, 0x49, 0x49, 0x46}, {0x22, 0x41, 0x49, 0x49, 0x36},
-    {0x18, 0x14, 0x12, 0x7f, 0x10}, {0x27, 0x45, 0x45, 0x45, 0x39}, {0x3e, 0x49, 0x49, 0x49, 0x32},
-    {0x01, 0x71, 0x09, 0x05, 0x03}, {0x36, 0x49, 0x49, 0x49, 0x36}, {0x26, 0x49, 0x49, 0x49, 0x3e},
-};
+// The framebuffer and the I2C payload together exceed the main task's stack, and
+// the selector is single-threaded, so both live in static storage.
+coretastic::Frame frame;
+uint8_t payload[1 + coretastic::Frame::kPages * coretastic::Frame::kWidth];
+
 esp_err_t send(const uint8_t *bytes, size_t size) {
   return i2c_master_write_to_device(port, 0x3c, bytes, size, pdMS_TO_TICKS(100));
 }
+// One control byte followed by the whole framebuffer in the panel's page layout.
+esp_err_t show() {
+  payload[0] = 0x40;
+  std::memcpy(payload + 1, frame.pages(), sizeof(payload) - 1);
+  const uint8_t address[] = {0, 0x21, 0, 127, 0x22, 0, 7};
+  const esp_err_t err = send(address, sizeof(address));
+  return err == ESP_OK ? send(payload, sizeof(payload)) : err;
+}
 } // namespace
+
 esp_err_t oled_init() {
   // V4.2/V4.3 Vext uses an inverting MOSFET before the OLED supply LDO.
   gpio_set_direction(GPIO_NUM_36, GPIO_MODE_OUTPUT);
@@ -54,28 +53,18 @@ esp_err_t oled_init() {
                           0x7f, 0xd9, 0xf1, 0xdb, 0x40, 0xa4, 0xa6, 0xaf};
   return send(init, sizeof(init));
 }
-esp_err_t oled_show(const char *a, const char *b, const char *c, const char *d) {
-  uint8_t frame[1025]{};
-  frame[0] = 0x40;
-  const char *lines[] = {a, b, c, d};
-  for (unsigned row = 0; row < 4; ++row) {
-    for (unsigned col = 0; lines[row][col] && col < 21; ++col) {
-      char ch = lines[row][col];
-      if (ch >= 'a' && ch <= 'z')
-        ch -= 32;
-      uint8_t *dest = frame + 1 + row * 256 + col * 6;
-      if (ch >= 'A' && ch <= 'Z')
-        memcpy(dest, glyphs[ch - 'A'], 5);
-      else if (ch >= '0' && ch <= '9')
-        memcpy(dest, glyphs[26 + ch - '0'], 5);
-      else if (ch == '>') {
-        dest[1] = 0x22;
-        dest[2] = 0x14;
-        dest[3] = 0x08;
-      }
-    }
-  }
-  const uint8_t address[] = {0, 0x21, 0, 127, 0x22, 0, 7};
-  esp_err_t err = send(address, sizeof(address));
-  return err == ESP_OK ? send(frame, sizeof(frame)) : err;
+
+esp_err_t oled_show_selector(unsigned selected, unsigned seconds) {
+  coretastic::compose_selector(frame, selected, seconds);
+  return show();
+}
+
+esp_err_t oled_show_boot(unsigned selected) {
+  coretastic::compose_boot(frame, selected);
+  return show();
+}
+
+esp_err_t oled_show_error(const char *title, const char *detail) {
+  coretastic::compose_error(frame, title, detail);
+  return show();
 }
