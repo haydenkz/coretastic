@@ -37,26 +37,17 @@ bool tile_lit(const Bitmap &bitmap, unsigned x, unsigned y) {
   return (byte >> (7 - (x & 7))) & 1;
 }
 
-// Unlit cells strictly inside the tile, where the knocked-out glyph sits.
-unsigned interior_holes(const Bitmap &bitmap) {
-  unsigned holes = 0;
-  for (unsigned y = 3; y + 3 < bitmap.height; ++y)
-    for (unsigned x = 3; x + 3 < bitmap.width; ++x)
-      holes += tile_lit(bitmap, x, y) ? 0 : 1;
-  return holes;
-}
-
-// Both firmware marks carry the same badge grammar: a lit rounded square with the
-// glyph knocked out of its center. A bare glyph, a dropped knockout, or an eroded
-// outline all fail one of these.
-void assert_badge_grammar(const Bitmap &mark) {
-  const unsigned right = mark.width - 1;
-  const unsigned bottom = mark.height - 1;
-  assert(tile_lit(mark, mark.width / 2, 0) && tile_lit(mark, mark.width / 2, bottom));
-  assert(tile_lit(mark, 0, mark.height / 2) && tile_lit(mark, right, mark.height / 2));
-  assert(!tile_lit(mark, 0, 0) && !tile_lit(mark, right, 0));
-  assert(!tile_lit(mark, 0, bottom) && !tile_lit(mark, right, bottom));
-  assert(interior_holes(mark) > 8);
+// Both marks are bare glyphs on an empty tile: no badge silhouette, ink concentrated
+// in the middle, and the two glyphs distinct.
+void assert_bare_glyph(const Bitmap &mark) {
+  assert(!tile_lit(mark, 0, 0) && !tile_lit(mark, mark.width - 1, 0));
+  assert(!tile_lit(mark, 0, mark.height - 1) && !tile_lit(mark, mark.width - 1, mark.height - 1));
+  assert(!tile_lit(mark, 0, mark.height / 2) && !tile_lit(mark, mark.width - 1, mark.height / 2));
+  unsigned inked = 0;
+  for (unsigned y = 3; y + 3 < mark.height; ++y)
+    for (unsigned x = 3; x + 3 < mark.width; ++x)
+      inked += tile_lit(mark, x, y) ? 1 : 0;
+  assert(inked > 8);
 }
 } // namespace
 
@@ -67,13 +58,15 @@ int main() {
   assert(kMeshtasticMark.width == 18 && kMeshtasticMark.height == 18);
   assert(kWordmark.width == 128 && kWordmark.height == 13);
   for (const Bitmap *mark : {&kMeshcoreMark, &kMeshtasticMark})
-    assert_badge_grammar(*mark);
-
-  // The two marks are the same badge: every row clear of the knocked-out glyph is lit
-  // identically, so the rounded silhouette cannot drift apart between them.
-  for (unsigned y : {0u, 1u, 2u, 3u, 4u, 13u, 14u, 15u, 16u, 17u})
+    assert_bare_glyph(*mark);
+  bool identical = true;
+  for (unsigned y = 0; y < kMeshcoreMark.height && identical; ++y)
     for (unsigned x = 0; x < kMeshcoreMark.width; ++x)
-      assert(tile_lit(kMeshcoreMark, x, y) == tile_lit(kMeshtasticMark, x, y));
+      if (tile_lit(kMeshcoreMark, x, y) != tile_lit(kMeshtasticMark, x, y)) {
+        identical = false;
+        break;
+      }
+  assert(!identical);
 
   Frame frame;
   frame.clear();

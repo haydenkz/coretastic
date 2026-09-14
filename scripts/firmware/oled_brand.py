@@ -3,32 +3,31 @@
 
 The selector owns a 128x64 one-bit SSD1306. The web flasher already ships the brand
 artwork, so this script re-derives monochrome tiles from those same PNGs instead of
-adding a second copy. Each firmware row carries its own mark, and both marks use one
-grammar: a lit rounded badge with the mark's glyph knocked out of it. Meshtastic's
-artwork ships that badge and MeshCore's antenna glyph is knocked out of the same
-outline. Output is deterministic; tests/test_oled_brand.py fails when the committed
-header drifts from the sources.
+adding a second copy. Each firmware row carries its own mark as a bare centered glyph:
+MeshCore's icon glyph fitted from its artwork, and Meshtastic's bolt carved from its
+badge artwork. Output is deterministic; tests/test_oled_brand.py fails when the
+committed header drifts from the sources.
 
     python scripts/firmware/oled_brand.py            # rewrite the header
     python scripts/firmware/oled_brand.py --preview  # also print the tiles as ASCII
 """
 
 import argparse
-import struct
-import zlib
+
 from pathlib import Path
+from PIL import Image as PillowImage
 
 ROOT = Path(__file__).resolve().parents[2]
 ASSETS = ROOT / "web" / "src" / "assets"
 HEADER = ROOT / "include" / "oled_brand.h"
 
-# Ink thresholds per artwork. White-on-transparent wordmarks use alpha coverage. Both
-# firmware marks sit on Meshtastic's badge, so the badge's lit face and the knockout
-# carried by it have their own thresholds; neither mark carries a shape of its own.
-BADGE_LIT_LEVEL = 0.5
+# Mark thresholds. MeshCore's glyph is white ink on a full-bleed black square, so ink
+# is the intersection of opacity and luminance; Meshtastic's bolt is dark opaque ink
+# carved from the badge face.
+BADGE_LIT_LEVEL = 0.7
 BADGE_KNOCKOUT_LEVEL = 0.10
+MESHCORE_GLYPH_WIDTH = 12
 MESHCORE_GLYPH_LEVEL = 0.30
-MESHCORE_GLYPH_WIDTH = 12  # fitted inside the 18px badge, where the Meshtastic bolt sits
 WORDMARK_LEVEL = 0.45
 
 
@@ -42,74 +41,13 @@ class Image:
 
 
 def read_png(path):
-    """Decode an 8-bit non-interlaced PNG into RGBA rows."""
-    data = path.read_bytes()
-    if data[:8] != b"\x89PNG\r\n\x1a\n":
-        raise ValueError(f"{path}: not a PNG")
-    offset = 8
-    idat = []
-    width = height = 0
-    while offset < len(data):
-        (length,) = struct.unpack(">I", data[offset : offset + 4])
-        kind = data[offset + 4 : offset + 8]
-        payload = data[offset + 8 : offset + 8 + length]
-        if kind == b"IHDR":
-            width, height, bit_depth, color, _, _, interlace = struct.unpack(
-                ">IIBBBBB", payload[:13]
-            )
-            if bit_depth != 8 or interlace != 0:
-                raise ValueError(f"{path}: only 8-bit non-interlaced PNGs are supported")
-        elif kind == b"IDAT":
-            idat.append(payload)
-        elif kind == b"IEND":
-            break
-        offset += 12 + length
-    channels = {0: 1, 2: 3, 4: 2, 6: 4}[color]
-    stride = width * channels
-    raw = zlib.decompress(b"".join(idat))
-    scan = bytearray(height * stride)
-    position = 0
-    for y in range(height):
-        filter_type = raw[position]
-        position += 1
-        row = raw[position : position + stride]
-        position += stride
-        base = y * stride
-        previous = base - stride
-        for x in range(stride):
-            left = scan[base + x - channels] if x >= channels else 0
-            up = scan[previous + x] if y else 0
-            upper_left = scan[previous + x - channels] if (y and x >= channels) else 0
-            value = row[x]
-            if filter_type == 0:
-                result = value
-            elif filter_type == 1:
-                result = value + left
-            elif filter_type == 2:
-                result = value + up
-            elif filter_type == 3:
-                result = value + ((left + up) >> 1)
-            else:
-                estimate = left + up - upper_left
-                distances = (abs(estimate - left), abs(estimate - up), abs(estimate - upper_left))
-                predictor = (left, up, upper_left)[distances.index(min(distances))]
-                result = value + predictor
-            scan[base + x] = result & 0xFF
-    rows = []
-    for y in range(height):
-        row = []
-        for x in range(width):
-            index = y * stride + x * channels
-            if channels == 4:
-                row.append(tuple(scan[index : index + 4]))
-            elif channels == 3:
-                row.append((scan[index], scan[index + 1], scan[index + 2], 255))
-            elif channels == 2:
-                row.append((scan[index],) * 3 + (scan[index + 1],))
-            else:
-                row.append((scan[index],) * 3 + (255,))
-        rows.append(row)
-    return Image(width, height, rows)
+    """Decode a PNG into 8-bit RGBA rows."""
+    with PillowImage.open(path) as png:
+        rgba = png.convert("RGBA")
+    width, height = rgba.size
+    raw = rgba.tobytes()
+    data = [tuple(raw[i : i + 4]) for i in range(0, len(raw), 4)]
+    return Image(width, height, [data[y * width : (y + 1) * width] for y in range(height)])
 
 
 def luminance(pixel):
@@ -185,54 +123,25 @@ def wordmark_tile(width, height, level):
 
 
 def badge_artwork():
-    """The Meshtastic rounded square, cropped to the badge that carries the grammar."""
+    """The Meshtastic rounded square, cropped to its opaque bounds."""
     image = read_png(ASSETS / "meshtastic.png")
     return crop(image, ink_bounds(image, lambda p: p[3] > 127))
 
 
-def badge(width, height):
-    """The lit rounded square both firmware marks sit on.
-
-    Lit is opaque artwork that is not dark ink. The bolt is dark, so it drops out here
-    too; the cells outside the rounded corners are transparent, and transparency reads as
-    dark as well, so they drop out with it and leave the rounded outline. Meshtastic's
-    alpha carries that outline, so it defines the shape; MeshCore's icon is a full-bleed
-    black square with no corner shape of its own and borrows this one, which is what makes
-    the two rows read as one grammar instead of a badge beside a floating glyph.
-    """
-    image = badge_artwork()
-    lit = threshold(coverage(image, width, height, lambda p: p[3] > 127), BADGE_LIT_LEVEL)
-    knocked = threshold(
-        coverage(image, width, height, lambda p: luminance(p) < 0.40), BADGE_KNOCKOUT_LEVEL
-    )
-    return [
-        [face and not hole for face, hole in zip(face_row, hole_row)]
-        for face_row, hole_row in zip(lit, knocked)
-    ]
-
-
-def knock_out(width, height, glyph):
-    """The shared badge with a glyph cleared out of its center."""
+def stamp(width, height, glyph):
+    """An empty tile with a glyph mask centered on it."""
     top = (height - len(glyph)) // 2
     left = (width - len(glyph[0])) // 2
-    tile = [list(row) for row in badge(width, height)]
-    for y in range(len(glyph)):
-        for x in range(len(glyph[0])):
-            if glyph[y][x]:
-                tile[top + y][left + x] = False
+    tile = [[False] * width for _ in range(height)]
+    for y, row in enumerate(glyph):
+        for x, value in enumerate(row):
+            if value:
+                tile[top + y][left + x] = True
     return tile
 
 
 def meshcore_tile(width, height):
-    """The MeshCore mark in the Meshtastic badge's grammar: its antenna glyph knocked out
-    of the same rounded square.
-
-    The icon is white ink on a full-bleed black square, so only the glyph is taken from it
-    and its opaque field is dropped. Ink is the intersection of opacity and luminance, and
-    cropping to that box removes the field. The glyph is fitted well inside the badge so it
-    keeps the Meshtastic bolt's margin instead of touching the outline; it is mostly
-    hairline at this size, so it is thresholded below even coverage.
-    """
+    """MeshCore's own glyph, fitted from its icon and centered on the tile."""
     image = read_png(ASSETS / "meshcore-icon.png")
 
     def ink(pixel):
@@ -240,14 +149,23 @@ def meshcore_tile(width, height):
 
     glyph = crop(image, ink_bounds(image, ink))
     glyph_height = max(1, round(MESHCORE_GLYPH_WIDTH * glyph.height / glyph.width))
-    return knock_out(
+    return stamp(
         width, height, fit(glyph, MESHCORE_GLYPH_WIDTH, glyph_height, ink, MESHCORE_GLYPH_LEVEL)
     )
 
 
 def meshtastic_tile(width, height):
-    """Meshtastic ships the badge itself; its own bolt is already the knockout."""
-    return badge(width, height)
+    """Meshtastic's bolt, standing alone: the dark ink carved from the badge face at
+    badge resolution, cropped and centered."""
+    image = badge_artwork()
+    face = threshold(coverage(image, width, height, lambda p: p[3] > 127), BADGE_LIT_LEVEL)
+    dark = threshold(
+        coverage(image, width, height, lambda p: luminance(p) < 0.40), BADGE_KNOCKOUT_LEVEL
+    )
+    bolt = [[f and d for f, d in zip(face_row, dark_row)] for face_row, dark_row in zip(face, dark)]
+    bolt_image = Image(width, height, bolt)
+    bolt_image = crop(bolt_image, ink_bounds(bolt_image, lambda value: value))
+    return stamp(width, height, bolt_image.pixels)
 
 
 TILES = (
