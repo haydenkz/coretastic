@@ -161,7 +161,13 @@ el("connect").onclick = () =>
   task(async () => {
     setProgress(0);
     setStatus("Connecting to ROM loader…", "working");
-    device = await UsbDevice.connect(log, setProgress);
+    device = await UsbDevice.connect(log, setProgress, () => {
+      device = undefined;
+      const message = "USB device disconnected. Reconnect before retrying.";
+      setStatus(message, "error");
+      log(message);
+      refresh();
+    });
     setStatus(`Connected: ${device.mac}`, "success");
   });
 el("disconnect").onclick = () =>
