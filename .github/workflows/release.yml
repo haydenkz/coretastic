@@ -1,0 +1,77 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: python -m pip install -r requirements.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci --prefix web
+      - run: python scripts/device/test.py
+      - run: python scripts/firmware/build.py all
+      - name: Package and validate
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          [ "$VERSION" = "$GITHUB_REF_NAME" ] && VERSION=local
+          rm -rf release
+          python scripts/release/package.py --version "$VERSION" --output release
+          python scripts/release/validate_release.py release/manifest.json
+          python scripts/release/source_bundle.py
+      - name: Build flasher with the bundle
+        run: |
+          mkdir -p web/public/releases
+          cp release/*.bin release/manifest.json release/SHA256SUMS web/public/releases/
+          npm run build --prefix web
+          npm run test:release --prefix web
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web/dist
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          NOTES=$(awk -v t="## $TAG" 'index($0, t)==1 {f=1; next} /^## / {f=0} f' CHANGELOG.md)
+          gh release view "$TAG" >/dev/null 2>&1 || \
+            gh release create "$TAG" --verify-tag --title "Coretastic $TAG" --notes "$NOTES"
+          gh release upload "$TAG" --clobber \
+            release/selector.bin release/meshcore.bin release/meshtastic.bin \
+            release/bootloader.bin release/partitions.bin \
+            release/manifest.json release/SHA256SUMS release/corresponding-source.tar.gz
+
+  deploy-pages:
+    needs: build
+    runs-on: ubuntu-24.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
