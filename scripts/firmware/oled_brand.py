@@ -3,10 +3,11 @@
 
 The selector owns a 128x64 one-bit SSD1306. The web flasher already ships the brand
 artwork, so this script re-derives monochrome tiles from those same PNGs instead of
-adding a second copy. Each firmware row carries its own mark; MeshCore's is its
-app-icon glyph and Meshtastic's is the badge with the bolt knocked out. Output is
-deterministic; tests/test_oled_brand.py fails when the committed header drifts from
-the sources.
+adding a second copy. Each firmware row carries its own mark, and both marks use one
+grammar: a lit rounded badge with the mark's glyph knocked out of it. Meshtastic's
+artwork ships that badge and MeshCore's antenna glyph is knocked out of the same
+outline. Output is deterministic; tests/test_oled_brand.py fails when the committed
+header drifts from the sources.
 
     python scripts/firmware/oled_brand.py            # rewrite the header
     python scripts/firmware/oled_brand.py --preview  # also print the tiles as ASCII
@@ -21,10 +22,13 @@ ROOT = Path(__file__).resolve().parents[2]
 ASSETS = ROOT / "web" / "src" / "assets"
 HEADER = ROOT / "include" / "oled_brand.h"
 
-# Ink thresholds per artwork. White-on-transparent wordmarks use alpha coverage; the
-# Meshtastic badge is lit with its dark bolt knocked out of the green field.
-MESHCORE_ICON_LEVEL = 0.30
-MESHTASTIC_GLYPH_LEVEL = 0.10
+# Ink thresholds per artwork. White-on-transparent wordmarks use alpha coverage. Both
+# firmware marks sit on Meshtastic's badge, so the badge's lit face and the knockout
+# carried by it have their own thresholds; neither mark carries a shape of its own.
+BADGE_LIT_LEVEL = 0.5
+BADGE_KNOCKOUT_LEVEL = 0.10
+MESHCORE_GLYPH_LEVEL = 0.30
+MESHCORE_GLYPH_WIDTH = 12  # fitted inside the 18px badge, where the Meshtastic bolt sits
 WORDMARK_LEVEL = 0.45
 
 
@@ -180,33 +184,70 @@ def wordmark_tile(width, height, level):
     return fit(image, width, height, lambda p: p[3] > 127, level)
 
 
-def meshcore_tile(width, height):
-    """The MeshCore app-icon glyph: a stylized antenna mark on a black field.
+def badge_artwork():
+    """The Meshtastic rounded square, cropped to the badge that carries the grammar."""
+    image = read_png(ASSETS / "meshtastic.png")
+    return crop(image, ink_bounds(image, lambda p: p[3] > 127))
 
-    The icon is white ink on black, so ink is the intersection of opacity and
-    luminance; cropping to that box drops the field before the fit. The glyph is
-    mostly hairline at this size, so threshold well below even coverage.
+
+def badge(width, height):
+    """The lit rounded square both firmware marks sit on.
+
+    Lit is opaque artwork that is not dark ink. The bolt is dark, so it drops out here
+    too; the cells outside the rounded corners are transparent, and transparency reads as
+    dark as well, so they drop out with it and leave the rounded outline. Meshtastic's
+    alpha carries that outline, so it defines the shape; MeshCore's icon is a full-bleed
+    black square with no corner shape of its own and borrows this one, which is what makes
+    the two rows read as one grammar instead of a badge beside a floating glyph.
+    """
+    image = badge_artwork()
+    lit = threshold(coverage(image, width, height, lambda p: p[3] > 127), BADGE_LIT_LEVEL)
+    knocked = threshold(
+        coverage(image, width, height, lambda p: luminance(p) < 0.40), BADGE_KNOCKOUT_LEVEL
+    )
+    return [
+        [face and not hole for face, hole in zip(face_row, hole_row)]
+        for face_row, hole_row in zip(lit, knocked)
+    ]
+
+
+def knock_out(width, height, glyph):
+    """The shared badge with a glyph cleared out of its center."""
+    top = (height - len(glyph)) // 2
+    left = (width - len(glyph[0])) // 2
+    tile = [list(row) for row in badge(width, height)]
+    for y in range(len(glyph)):
+        for x in range(len(glyph[0])):
+            if glyph[y][x]:
+                tile[top + y][left + x] = False
+    return tile
+
+
+def meshcore_tile(width, height):
+    """The MeshCore mark in the Meshtastic badge's grammar: its antenna glyph knocked out
+    of the same rounded square.
+
+    The icon is white ink on a full-bleed black square, so only the glyph is taken from it
+    and its opaque field is dropped. Ink is the intersection of opacity and luminance, and
+    cropping to that box removes the field. The glyph is fitted well inside the badge so it
+    keeps the Meshtastic bolt's margin instead of touching the outline; it is mostly
+    hairline at this size, so it is thresholded below even coverage.
     """
     image = read_png(ASSETS / "meshcore-icon.png")
 
     def ink(pixel):
         return pixel[3] > 127 and luminance(pixel) > 0.6
 
-    image = crop(image, ink_bounds(image, ink))
-    return fit(image, width, height, ink, MESHCORE_ICON_LEVEL)
+    glyph = crop(image, ink_bounds(image, ink))
+    glyph_height = max(1, round(MESHCORE_GLYPH_WIDTH * glyph.height / glyph.width))
+    return knock_out(
+        width, height, fit(glyph, MESHCORE_GLYPH_WIDTH, glyph_height, ink, MESHCORE_GLYPH_LEVEL)
+    )
 
 
 def meshtastic_tile(width, height):
-    """Meshtastic ships no wordmark; its badge is lit with the bolt knocked out."""
-    image = read_png(ASSETS / "meshtastic.png")
-    image = crop(image, ink_bounds(image, lambda p: p[3] > 127))
-    lit_cells = coverage(image, width, height, lambda p: p[3] > 127)
-    # The bolt inside the badge is a hairline at this size, so threshold it well below
-    # the badge's own coverage to keep the knockout instead of filling the tile solid.
-    knocked = threshold(coverage(image, width, height, lambda p: luminance(p) < 0.40), 0.10)
-    return [
-        [lit_cells[y][x] >= 0.5 and not knocked[y][x] for x in range(width)] for y in range(height)
-    ]
+    """Meshtastic ships the badge itself; its own bolt is already the knockout."""
+    return badge(width, height)
 
 
 TILES = (

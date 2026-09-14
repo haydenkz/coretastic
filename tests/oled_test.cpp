@@ -31,20 +31,32 @@ unsigned lit(const Frame &frame) {
   return count;
 }
 
-// True when the tile carries a single connected run of ink in both axes, i.e. no
-// glyph was silently dropped to an empty or scattered bitmap by a bad threshold.
-bool has_solid_mark(const Bitmap &bitmap, unsigned columns) {
-  for (unsigned row = 0; row < bitmap.height; ++row) {
-    unsigned run = 0;
-    for (unsigned column = 0; column < columns; ++column) {
-      const uint8_t byte = bitmap.bits[row * ((bitmap.width + 7) / 8) + (column >> 3)];
-      if ((byte >> (7 - (column & 7))) & 1)
-        ++run;
-    }
-    if (run >= columns / 2)
-      return true;
-  }
-  return false;
+// Bit (x, y) of a packed tile, MSB-leftmost with each row byte-padded.
+bool tile_lit(const Bitmap &bitmap, unsigned x, unsigned y) {
+  const uint8_t byte = bitmap.bits[y * ((bitmap.width + 7) / 8) + (x >> 3)];
+  return (byte >> (7 - (x & 7))) & 1;
+}
+
+// Unlit cells strictly inside the tile, where the knocked-out glyph sits.
+unsigned interior_holes(const Bitmap &bitmap) {
+  unsigned holes = 0;
+  for (unsigned y = 3; y + 3 < bitmap.height; ++y)
+    for (unsigned x = 3; x + 3 < bitmap.width; ++x)
+      holes += tile_lit(bitmap, x, y) ? 0 : 1;
+  return holes;
+}
+
+// Both firmware marks carry the same badge grammar: a lit rounded square with the
+// glyph knocked out of its center. A bare glyph, a dropped knockout, or an eroded
+// outline all fail one of these.
+void assert_badge_grammar(const Bitmap &mark) {
+  const unsigned right = mark.width - 1;
+  const unsigned bottom = mark.height - 1;
+  assert(tile_lit(mark, mark.width / 2, 0) && tile_lit(mark, mark.width / 2, bottom));
+  assert(tile_lit(mark, 0, mark.height / 2) && tile_lit(mark, right, mark.height / 2));
+  assert(!tile_lit(mark, 0, 0) && !tile_lit(mark, right, 0));
+  assert(!tile_lit(mark, 0, bottom) && !tile_lit(mark, right, bottom));
+  assert(interior_holes(mark) > 8);
 }
 } // namespace
 
@@ -55,7 +67,13 @@ int main() {
   assert(kMeshtasticMark.width == 18 && kMeshtasticMark.height == 18);
   assert(kWordmark.width == 128 && kWordmark.height == 13);
   for (const Bitmap *mark : {&kMeshcoreMark, &kMeshtasticMark})
-    assert(has_solid_mark(*mark, mark->width));
+    assert_badge_grammar(*mark);
+
+  // The two marks are the same badge: every row clear of the knocked-out glyph is lit
+  // identically, so the rounded silhouette cannot drift apart between them.
+  for (unsigned y : {0u, 1u, 2u, 3u, 4u, 13u, 14u, 15u, 16u, 17u})
+    for (unsigned x = 0; x < kMeshcoreMark.width; ++x)
+      assert(tile_lit(kMeshcoreMark, x, y) == tile_lit(kMeshtasticMark, x, y));
 
   Frame frame;
   frame.clear();
