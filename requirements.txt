@@ -20,7 +20,7 @@ idna==3.19
 intelhex==2.3.0
 marshmallow==3.26.2
 packaging==26.3
-platformio==6.1.18
+platformio==6.2.0
 protobuf==7.36.1
 pycparser==3.0
 pyelftools==0.33
