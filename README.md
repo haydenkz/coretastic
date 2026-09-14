@@ -67,6 +67,8 @@ npm run dev --prefix web
 
 No Android USB flashing configuration is validated yet; use a desktop browser or the CLI.
 
+The flasher filters the browser picker to the Heltec V4 native USB serial interface. On Linux, choose **Espressif USB JTAG/serial debug unit**. If it is absent, verify access to `/dev/ttyACM*` and close serial monitors, ModemManager, or brltty.
+
 ## Command-line flasher
 
 ```sh
@@ -137,7 +139,7 @@ tests/            Host + Python tests (selector, screens, flash, layout)
 
 ## Troubleshooting
 
-- **No USB port** — use a data cable, close serial monitors, enter ROM recovery (PRG + RESET); the browser needs localhost.
+- **No USB port** — use a data cable, close serial monitors, enter ROM recovery (PRG + RESET), and use HTTPS or localhost. On Linux, select **Espressif USB JTAG/serial debug unit**, verify access to `/dev/ttyACM0`, and check that ModemManager or brltty is not holding it.
 - **Wrong flash size / chip** — stop: offsets are only defined for the 16 MiB board.
 - **Pairing fails after reset/restore of one firmware** — forget that firmware's BLE device in Android and pair again.
 - **Layout mismatch on update** — use recovery for a compatible table, or back up and do a destructive install.

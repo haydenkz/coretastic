@@ -129,6 +129,8 @@ def execute(args):
                 ota.write_bytes(b"\xff" * 8192)
                 files.append((0xE000, ota))
             command = [
+                "--port",
+                args.port,
                 "--chip",
                 "esp32s3",
                 "--after",
@@ -145,6 +147,9 @@ def execute(args):
                 command.append("--erase-all")
             for address, file in sorted(files):
                 command.extend([hex(address), str(file)])
+            # The stub is already running on `esp`; tell esptool.main not to
+            # upload it a second time (overlapping RAM raises FatalError).
+            esp.sync_stub_detected = True
             esptool.main(command, esp=esp)
             for address, file in files:
                 data = file.read_bytes()

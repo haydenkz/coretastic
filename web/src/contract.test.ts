@@ -14,7 +14,7 @@ import {
   validateManifest,
 } from "./contract";
 import type { Manifest, ImageName } from "./contract";
-import { program } from "./flasher";
+import { program, selectEspressifPort } from "./flasher";
 
 function image(): Uint8Array {
   const bytes = new Uint8Array(336),
@@ -64,6 +64,43 @@ function release() {
   };
   return { manifest, assets };
 }
+describe("USB serial selection", () => {
+  const port = (vendor = 0x303a, product = 0x1001) =>
+    ({
+      getInfo: () => ({ usbVendorId: vendor, usbProductId: product }),
+    }) as SerialPort;
+
+  it("reuses one granted Espressif port without reopening the chooser", async () => {
+    const granted = port();
+    let requests = 0;
+    const selected = await selectEspressifPort({
+      getPorts: async () => [granted],
+      requestPort: async () => {
+        requests++;
+        return port();
+      },
+    });
+    expect(selected).toBe(granted);
+    expect(requests).toBe(0);
+  });
+
+  it("filters the chooser to the Heltec ESP32-S3 USB interface", async () => {
+    const selectedPort = port();
+    let options: SerialPortRequestOptions | undefined;
+    const selected = await selectEspressifPort({
+      getPorts: async () => [port(0x1234, 0x5678)],
+      requestPort: async (value) => {
+        options = value;
+        return selectedPort;
+      },
+    });
+    expect(selected).toBe(selectedPort);
+    expect(options).toEqual({
+      filters: [{ usbVendorId: 0x303a, usbProductId: 0x1001 }],
+    });
+  });
+});
+
 describe("flash contract", () => {
   it("rejects embedded image corruption and wrong chips", () => {
     validateImage(image(), true);

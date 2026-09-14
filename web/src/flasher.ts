@@ -10,6 +10,42 @@ import {
   imageNames,
 } from "./contract";
 import type { Manifest, Operation, ImageName } from "./contract";
+// Native USB Serial/JTAG interface on supported Heltec V4 boards.
+const HELTEC_V4_USB_FILTER: SerialPortFilter = {
+  usbVendorId: 0x303a,
+  usbProductId: 0x1001,
+};
+
+function isEspressifUsb(port: SerialPort): boolean {
+  const info = port.getInfo();
+  return (
+    info.usbVendorId === HELTEC_V4_USB_FILTER.usbVendorId &&
+    info.usbProductId === HELTEC_V4_USB_FILTER.usbProductId
+  );
+}
+
+export async function selectEspressifPort(
+  serial: Pick<Serial, "getPorts" | "requestPort"> = navigator.serial,
+): Promise<SerialPort> {
+  const granted = (await serial.getPorts()).filter(isEspressifUsb);
+  if (granted.length === 1) return granted[0];
+  return serial.requestPort({ filters: [HELTEC_V4_USB_FILTER] });
+}
+
+function serialConnectionError(error: unknown): Error {
+  if (!(error instanceof DOMException))
+    return error instanceof Error ? error : new Error(String(error));
+  if (error.name === "NotFoundError")
+    return new Error("No Espressif USB serial device was selected.", {
+      cause: error,
+    });
+  if (error.name === "NetworkError" || error.name === "InvalidStateError")
+    return new Error(
+      "Could not open the USB serial port. On Linux, close serial monitors and verify access to /dev/ttyACM0.",
+      { cause: error },
+    );
+  return error;
+}
 
 export interface Device {
   mac: string;
@@ -56,23 +92,53 @@ export async function program(
 }
 export class UsbDevice implements Device {
   mac = "";
+  private detached = false;
+  private readonly serialDisconnect = (event: Event) => {
+    if (event.target === this.transport.device) this.reportDisconnect();
+  };
   constructor(
     readonly loader: ESPLoader,
     readonly transport: Transport,
     readonly progress: (percent: number) => void,
+    private readonly disconnected: () => void,
   ) {}
+
+  private reportDisconnect() {
+    if (this.detached) return;
+    this.detached = true;
+    this.stopWatchingDisconnect();
+    this.disconnected();
+  }
+
+  private stopWatchingDisconnect() {
+    navigator.serial.removeEventListener("disconnect", this.serialDisconnect);
+    this.transport.setDeviceLostCallback(null);
+  }
+
   static async connect(
     log: (message: string) => void,
     progress: (percent: number) => void,
+    disconnected: () => void = () => {},
   ): Promise<UsbDevice> {
-    const port = await navigator.serial.requestPort();
+    let port: SerialPort;
+    try {
+      port = await selectEspressifPort();
+    } catch (error) {
+      throw serialConnectionError(error);
+    }
+    const info = port.getInfo();
+    log(
+      `Selected USB serial ${info.usbVendorId?.toString(16).padStart(4, "0")}:${info.usbProductId?.toString(16).padStart(4, "0")}.`,
+    );
     const transport = new Transport(port, false);
     const loader = new ESPLoader({
       transport,
       baudrate: 460800,
       terminal: { clean() {}, write: log, writeLine: log },
     });
-    const device = new UsbDevice(loader, transport, progress);
+    const device = new UsbDevice(loader, transport, progress, disconnected);
+    navigator.serial.addEventListener("disconnect", device.serialDisconnect);
+    transport.setDeviceLostCallback(() => device.reportDisconnect());
     try {
       await loader.main();
       requireCondition(
@@ -99,8 +165,9 @@ export class UsbDevice implements Device {
       );
       return device;
     } catch (error) {
+      device.stopWatchingDisconnect();
       await transport.disconnect().catch(() => {});
-      throw error;
+      throw serialConnectionError(error);
     }
   }
   async read(address: number, size: number) {
@@ -143,6 +210,8 @@ export class UsbDevice implements Device {
     await this.write([{ address: 0, data: bytes }], true);
   }
   async disconnect() {
+    this.detached = true;
+    this.stopWatchingDisconnect();
     await this.transport.disconnect();
   }
 }

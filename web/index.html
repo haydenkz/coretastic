@@ -94,6 +94,10 @@
             />
             <span>Heltec WiFi LoRa 32 V4.2/V4.3 OLED</span>
           </label>
+          <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
+            Confirm the revision printed on the PCB to enable USB. The browser
+            cannot distinguish V4.2/V4.3 OLED from unsupported variants.
+          </p>
         </li>
 
         <li
@@ -128,7 +132,8 @@
           </p>
           <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
             For ROM recovery: hold PRG, press and release RESET, then release
-            PRG. Use a USB data cable and close other serial applications.
+            PRG. On Linux, choose “Espressif USB JTAG/serial debug unit” and
+            close anything using <code>/dev/ttyACM0</code>.
           </p>
         </li>
 
