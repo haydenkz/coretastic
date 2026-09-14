@@ -50,8 +50,8 @@ bool has_solid_mark(const Bitmap &bitmap, unsigned columns) {
 
 int main() {
   // The packed layout is MSB-leftmost, byte-padded per row, which oled.cpp replays
-  // verbatim. Verify the encoder contract on a mark whose first row is known.
-  assert(kMeshcoreMark.width == 18 && kMeshcoreMark.height == 18);
+  // verbatim. MeshCore's mark is its wordmark; Meshtastic's is its badge.
+  assert(kMeshcoreMark.width == 96 && kMeshcoreMark.height == 12);
   assert(kMeshtasticMark.width == 18 && kMeshtasticMark.height == 18);
   assert(kWordmark.width == 128 && kWordmark.height == 13);
   for (const Bitmap *mark : {&kMeshcoreMark, &kMeshtasticMark})
@@ -113,13 +113,13 @@ int main() {
 
   // The two highlight bands are separated and the footer band is untouched.
   for (unsigned x = 0; x < 128; ++x)
-    for (unsigned y = 13; y < 15; ++y)
+    for (unsigned y = 13; y < 16; ++y)
       assert(!first.at(x, y));
   for (unsigned x = 0; x < 128; ++x)
-    for (unsigned y = 33; y < 35; ++y)
+    for (unsigned y = 34; y < 36; ++y)
       assert(!first.at(x, y));
   for (unsigned x = 0; x < 128; ++x)
-    for (unsigned y = 53; y < 55; ++y)
+    for (unsigned y = 54; y < 56; ++y)
       assert(!first.at(x, y));
 
   coretastic::compose_boot(frame, 1);

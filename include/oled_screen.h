@@ -4,36 +4,56 @@
 #include <cstdio>
 
 namespace coretastic {
-// The branded selector screen. Composition is pure so the host tests can rasterize
-// it without an SSD1306 attached; oled.cpp only ships the finished framebuffer.
+// The branded screens. Composition is pure so the host tests can rasterize them
+// without an SSD1306 attached; oled.cpp only ships the finished framebuffer.
+//
+// Grammar: the Coretastic wordmark spans the header, every firmware row leads with
+// its own mark, and a name follows only where the mark does not already carry one
+// (the MeshCore wordmark does; the Meshtastic badge does not). The selection is an
+// inverted full-width band and the countdown footer is the PRG affordance.
+
+constexpr unsigned kRowTop = 16;    // first firmware row
+constexpr unsigned kRowPitch = 20;  // distance between row bands
+constexpr unsigned kRowBand = 18;   // highlight band height
+constexpr unsigned kFooterTop = 56; // PRG/countdown line
+
+struct Row {
+  const Bitmap &mark;
+  const char *label; // Null when the mark is itself the firmware name.
+};
+
+// The firmware rows in selection order. A function rather than a namespace-scope
+// table because the C++11 firmware toolchain has no inline variables.
+inline Row row(unsigned index) {
+  return index == 0 ? Row{kMeshcoreMark, nullptr} : Row{kMeshtasticMark, "MESHTASTIC"};
+}
+
+inline void draw_row(Frame &frame, const Row &row, unsigned top) {
+  frame.bitmap(4, top + (kRowBand - row.mark.height) / 2, row.mark);
+  if (row.label)
+    frame.text(4 + row.mark.width + 6, top + (kRowBand - 7) / 2, row.label);
+}
+
 inline void compose_selector(Frame &frame, unsigned selected, unsigned seconds) {
   frame.clear();
   frame.bitmap(0, 0, kWordmark);
-  const Bitmap marks[] = {kMeshcoreMark, kMeshtasticMark};
-  const char *labels[] = {"MESHCORE", "MESHTASTIC"};
-  for (unsigned row = 0; row < 2; ++row) {
-    // Marks are 18 px tall on a 20 px pitch, leaving a clear separator row between
-    // the two highlight bands and keeping the footer band untouched.
-    const unsigned top = 15 + row * 20;
-    frame.bitmap(4, top, marks[row]);
-    frame.text(4 + marks[row].width + 6, top + (marks[row].height - 7) / 2, labels[row]);
-    if (row == selected)
-      frame.invert(0, top, Frame::kWidth, marks[row].height);
+  for (unsigned row_index = 0; row_index < 2; ++row_index) {
+    const unsigned top = kRowTop + row_index * kRowPitch;
+    draw_row(frame, row(row_index), top);
+    if (row_index == selected)
+      frame.invert(0, top, Frame::kWidth, kRowBand);
   }
   char countdown[28];
   std::snprintf(countdown, sizeof(countdown), "PRG CHANGE   BOOT %u", seconds);
-  frame.text(4, 55, countdown);
+  frame.text(4, kFooterTop, countdown);
 }
 
 // Shown for the moment between committing the boot target and restarting.
 inline void compose_boot(Frame &frame, unsigned selected) {
   frame.clear();
   frame.bitmap(0, 0, kWordmark);
-  const Bitmap marks[] = {kMeshcoreMark, kMeshtasticMark};
-  const char *labels[] = {"MESHCORE", "MESHTASTIC"};
-  frame.bitmap(4, 32, marks[selected]);
-  frame.text(4 + marks[selected].width + 6, 36, "BOOTING");
-  frame.text(4 + marks[selected].width + 6, 46, labels[selected]);
+  draw_row(frame, row(selected), 28);
+  frame.text(4, 48, "BOOTING");
 }
 
 // Fatal stop. The wordmark stays so the brand still reads on a failed boot.

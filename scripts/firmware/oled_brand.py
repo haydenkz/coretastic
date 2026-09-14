@@ -3,8 +3,9 @@
 
 The selector owns a 128x64 one-bit SSD1306. The web flasher already ships the brand
 artwork, so this script re-derives monochrome tiles from those same PNGs instead of
-adding a second copy. Output is deterministic; tests/test_oled_brand.py fails when the
-committed header drifts from the sources.
+adding a second copy. Each firmware row carries its own wordmark; Meshtastic ships no
+wordmark, so its row uses the badge with the bolt knocked out. Output is deterministic;
+tests/test_oled_brand.py fails when the committed header drifts from the sources.
 
     python scripts/firmware/oled_brand.py            # rewrite the header
     python scripts/firmware/oled_brand.py --preview  # also print the tiles as ASCII
@@ -18,6 +19,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 ASSETS = ROOT / "web" / "src" / "assets"
 HEADER = ROOT / "include" / "oled_brand.h"
+
+# Ink thresholds per artwork. White-on-transparent wordmarks use alpha coverage; the
+# Meshtastic badge is lit with its dark bolt knocked out of the green field.
+MESHCORE_INK_LEVEL = 0.42
+MESHTASTIC_GLYPH_LEVEL = 0.10
+WORDMARK_LEVEL = 0.45
 
 
 class Image:
@@ -36,13 +43,13 @@ def read_png(path):
         raise ValueError(f"{path}: not a PNG")
     offset = 8
     idat = []
-    width = height = bit_depth = color = 0
+    width = height = 0
     while offset < len(data):
         (length,) = struct.unpack(">I", data[offset : offset + 4])
         kind = data[offset + 4 : offset + 8]
         payload = data[offset + 8 : offset + 8 + length]
         if kind == b"IHDR":
-            width, height, bit_depth, color, compression, _, interlace = struct.unpack(
+            width, height, bit_depth, color, _, _, interlace = struct.unpack(
                 ">IIBBBBB", payload[:13]
             )
             if bit_depth != 8 or interlace != 0:
@@ -166,38 +173,46 @@ def pack(mask):
     return bytes(data)
 
 
-def build():
-    """Return the ordered (name, width, height, packed bytes) tiles."""
-    wordmark = read_png(ASSETS / "CORETASTIC.png")
-    wordmark = crop(wordmark, ink_bounds(wordmark, lambda p: p[3] > 127))
-    mark_core = fit(wordmark, 128, 13, lambda p: p[3] > 127, 0.45)
+def wordmark_tile(width, height, level):
+    image = read_png(ASSETS / "CORETASTIC.png")
+    image = crop(image, ink_bounds(image, lambda p: p[3] > 127))
+    return fit(image, width, height, lambda p: p[3] > 127, level)
 
-    meshcore = read_png(ASSETS / "meshcore.png")
-    meshcore = crop(meshcore, ink_bounds(meshcore, lambda p: p[3] > 127))
-    # The wordmark's leading glyph is the MeshCore "M"; crop to its own ink so the
-    # tile is filled instead of carrying the wordmark's inter-letter whitespace.
-    leading_width = min(118, meshcore.width)
-    leading = crop(meshcore, (0, 0, leading_width - 1, meshcore.height - 1))
-    leading = crop(leading, ink_bounds(leading, lambda p: p[3] > 127))
-    mark_meshcore = fit(leading, 18, 18, lambda p: p[3] > 127, 0.42)
 
-    meshtastic = read_png(ASSETS / "meshtastic.png")
-    meshtastic = crop(meshtastic, ink_bounds(meshtastic, lambda p: p[3] > 127))
-    lit = lambda p: p[3] > 127  # noqa: E731
-    glyph = lambda p: p[3] > 127 and luminance(p) < 0.40  # noqa: E731
-    lit_cells = coverage(meshtastic, 18, 18, lit)
-    glyph_cells = coverage(meshtastic, 18, 18, glyph)
-    # The bolt inside the disc is a hairline at this size, so threshold it well below
-    # the disc's own coverage to keep the knockout instead of filling the tile solid.
-    knocked = threshold(glyph_cells, 0.10)
-    mark_meshtastic = [
-        [lit_cells[y][x] >= 0.5 and not knocked[y][x] for x in range(18)] for y in range(18)
+def meshcore_tile(width, height):
+    """The MeshCore wordmark is the firmware's mark."""
+    image = read_png(ASSETS / "meshcore.png")
+    image = crop(image, ink_bounds(image, lambda p: p[3] > 127))
+    return fit(image, width, height, lambda p: p[3] > 127, MESHCORE_INK_LEVEL)
+
+
+def meshtastic_tile(width, height):
+    """Meshtastic ships no wordmark; its badge is lit with the bolt knocked out."""
+    image = read_png(ASSETS / "meshtastic.png")
+    image = crop(image, ink_bounds(image, lambda p: p[3] > 127))
+    lit_cells = coverage(image, width, height, lambda p: p[3] > 127)
+    # The bolt inside the badge is a hairline at this size, so threshold it well below
+    # the badge's own coverage to keep the knockout instead of filling the tile solid.
+    knocked = threshold(coverage(image, width, height, lambda p: luminance(p) < 0.40), 0.10)
+    return [
+        [lit_cells[y][x] >= 0.5 and not knocked[y][x] for x in range(width)] for y in range(height)
     ]
 
+
+TILES = (
+    ("kWordmark", wordmark_tile),
+    ("kMeshcoreMark", meshcore_tile),
+    ("kMeshtasticMark", meshtastic_tile),
+)
+
+
+def build():
+    """Return the ordered (name, width, height, mask) tiles."""
+    # One screen grammar: a full-width Coretastic header and wordmark rows per firmware.
     return [
-        ("kWordmark", 128, 13, mark_core),
-        ("kMeshcoreMark", 18, 18, mark_meshcore),
-        ("kMeshtasticMark", 18, 18, mark_meshtastic),
+        ("kWordmark", 128, 13, wordmark_tile(128, 13, WORDMARK_LEVEL)),
+        ("kMeshcoreMark", 96, 12, meshcore_tile(96, 12)),
+        ("kMeshtasticMark", 18, 18, meshtastic_tile(18, 18)),
     ]
 
 
