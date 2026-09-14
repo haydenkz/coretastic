@@ -18,7 +18,7 @@ grpcio-tools==1.83.1
 h11==0.16.0
 idna==3.19
 intelhex==2.3.0
-marshmallow==3.26.2
+marshmallow==4.3.1
 packaging==26.3
 platformio==6.2.0
 protobuf==7.36.1
