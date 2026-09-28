@@ -210,6 +210,8 @@ el("run").onclick = () =>
       for (const name of imageNames(op as Operation)) {
         const response = await fetch(
           new URL(`releases/${manifest.images[name].file}`, document.baseURI),
+          // A stale cached image would fail its checksum on every retry.
+          { cache: "no-cache" },
         );
         if (!response.ok)
           throw new Error(`Download ${name}: HTTP ${response.status}.`);
@@ -261,6 +263,7 @@ refresh();
 void task(async () => {
   const response = await fetch(
     new URL("releases/manifest.json", document.baseURI),
+    { cache: "no-cache" },
   );
   if (!response.ok)
     throw new Error(

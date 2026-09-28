@@ -122,6 +122,9 @@ describe("flash contract", () => {
     bad.images.meshcore.size = 336;
     bad.storage_epoch.meshcore = 2;
     expect(() => validateManifest(bad)).toThrow();
+    const unpinned = structuredClone(manifest) as Partial<Manifest>;
+    delete unpinned.upstream;
+    expect(() => validateManifest(unpinned)).toThrow("upstream");
   });
   it("never writes when a download or the installed layout is invalid", async () => {
     const { manifest, assets } = release();
@@ -176,5 +179,12 @@ describe("flash contract", () => {
     expect(() => restoreBackup(saved, "aa:bb:cc:dd:ee:ff", BOARD)).toThrow(
       "checksum",
     );
+    for (const header of ["not json", "[1]", '{"mac": 1}', "{}"]) {
+      const input = new Uint8Array(4096 + FLASH_SIZE);
+      input.set(new TextEncoder().encode(header));
+      expect(() => restoreBackup(input, "aa:bb:cc:dd:ee:ff", BOARD)).toThrow(
+        /metadata/,
+      );
+    }
   });
 });

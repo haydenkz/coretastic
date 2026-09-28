@@ -114,6 +114,11 @@ export function validateManifest(input: unknown): Manifest {
       m.storage_epoch?.[name] === 1,
       `Incompatible ${name} settings format.`,
     );
+  for (const name of ["meshcore", "meshtastic"])
+    requireCondition(
+      typeof m.upstream?.[name]?.version === "string",
+      `Missing ${name} upstream version.`,
+    );
   requireCondition(
     m.images &&
       Object.keys(m.images).sort().join() ===
@@ -226,17 +231,35 @@ export function restoreBackup(
   const header = input.slice(0, 4096);
   const end = header.indexOf(0);
   requireCondition(end > 0, "Invalid backup metadata.");
-  const meta = JSON.parse(new TextDecoder().decode(header.slice(0, end)));
+  let meta: unknown;
+  try {
+    meta = JSON.parse(new TextDecoder().decode(header.slice(0, end)));
+  } catch {
+    meta = undefined;
+  }
+  requireCondition(
+    meta && typeof meta === "object",
+    "Invalid backup metadata.",
+  );
+  const {
+    format,
+    mac: owner,
+    board: origin,
+    size,
+    sha256,
+  } = meta as Record<string, unknown>;
   const bytes = input.slice(4096);
   requireCondition(
-    meta.format === "coretastic-backup-v1" &&
-      meta.mac.toLowerCase() === mac.toLowerCase() &&
-      COMPATIBLE_BACKUP_BOARDS[meta.board] === true &&
+    format === "coretastic-backup-v1" &&
+      typeof owner === "string" &&
+      owner.toLowerCase() === mac.toLowerCase() &&
+      typeof origin === "string" &&
+      COMPATIBLE_BACKUP_BOARDS[origin] === true &&
       COMPATIBLE_BACKUP_BOARDS[board] === true &&
-      meta.size === FLASH_SIZE,
+      size === FLASH_SIZE,
     "Backup belongs to another board or has incompatible metadata.",
   );
-  requireCondition(meta.sha256 === hash(bytes), "Backup checksum mismatch.");
+  requireCondition(sha256 === hash(bytes), "Backup checksum mismatch.");
   requireCondition(
     hash(bytes.slice(0x8000, 0x9000)) === hash(partitionBinary()),
     "Backup does not contain this dual-boot layout. Use the original firmware recovery tool.",

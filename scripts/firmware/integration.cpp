@@ -1,6 +1,7 @@
 // Linked into both upstream apps. This protects supported SDK write paths;
 // the ESP32 does not provide a security sandbox between native applications.
 #include "esp_flash.h"
+#include "esp_log.h"
 #include "esp_ota_ops.h"
 #include "esp_system.h"
 #include "nvs.h"
@@ -120,7 +121,9 @@ esp_err_t __wrap_esp_ota_set_boot_partition(const esp_partition_t *) {
   return ESP_ERR_NOT_SUPPORTED;
 }
 void __wrap_app_main() {
-  (void)restore_selector_boot();
+  // On failure RESET keeps booting this app instead of the selector; say why.
+  if (!restore_selector_boot())
+    ESP_LOGE("coretastic", "Could not return boot to the selector; use USB recovery");
   uint8_t mac[6];
   ESP_ERROR_CHECK(esp_efuse_mac_get_default(mac));
   mac[0] = (mac[0] | 2) & 0xfe;

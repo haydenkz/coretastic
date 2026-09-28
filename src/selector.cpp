@@ -44,10 +44,13 @@ extern "C" void app_main() {
   button.pin_bit_mask = 1ULL << GPIO_NUM_0;
   button.mode = GPIO_MODE_INPUT;
   button.pull_up_en = GPIO_PULLUP_ENABLE;
-  ESP_ERROR_CHECK(gpio_config(&button));
+  // Failures stop on the error screen; ESP_ERROR_CHECK would abort into a reboot loop.
+  if (gpio_config(&button) != ESP_OK)
+    error("BUTTON ERROR");
   esp_err_t err = nvs_flash_init_partition("selector_nvs");
   if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-    ESP_ERROR_CHECK(nvs_flash_erase_partition("selector_nvs"));
+    if (nvs_flash_erase_partition("selector_nvs") != ESP_OK)
+      error("NVS ERASE ERROR");
     err = nvs_flash_init_partition("selector_nvs");
   }
   if (err != ESP_OK)
@@ -75,6 +78,8 @@ extern "C" void app_main() {
   if (!app)
     error("APP NOT FOUND");
   // set_boot_partition verifies the complete image before committing OTA data.
+  // Each boot cycle costs otadata sector erases here and in the app's handoff;
+  // at the flash's rated endurance that is tens of thousands of reboots.
   if (esp_ota_set_boot_partition(app) != ESP_OK)
     error("INVALID APP IMAGE");
   if (nvs_set_u8(nvs, "selected", state.selection()) != ESP_OK || nvs_commit(nvs) != ESP_OK)

@@ -3,17 +3,11 @@
 
 import argparse
 import contextlib
+import hashlib
 import json
 import sys
 import tempfile
 from pathlib import Path
-
-# device/flash.py imports layout; resolve the sibling package for direct
-# invocation as well as package import.
-for _tooling in ["scripts/device"]:
-    _tooling_path = Path(__file__).resolve().parents[2] / _tooling
-    if str(_tooling_path) not in sys.path:
-        sys.path.insert(0, str(_tooling_path))
 
 from layout import BOARDS, FLASH_SIZE, load_manifest, partition_binary, sha
 
@@ -32,11 +26,17 @@ def make_backup(data, mac, board):
 def read_backup(data, mac, board):
     if len(data) != FLASH_SIZE + 4096:
         raise ValueError("Wrong backup length")
-    meta = json.loads(data[:4096].split(b"\0", 1)[0])
+    try:
+        meta = json.loads(data[:4096].split(b"\0", 1)[0])
+    except ValueError:
+        meta = None
+    if not isinstance(meta, dict):
+        raise ValueError("Invalid backup metadata")
     flash = data[4096:]
     if (
         meta.get("format") != "coretastic-backup-v1"
-        or meta.get("mac", "").lower() != mac.lower()
+        or not isinstance(meta.get("mac"), str)
+        or meta["mac"].lower() != mac.lower()
         or meta.get("board") not in COMPATIBLE_BACKUP_BOARDS
         or board not in COMPATIBLE_BACKUP_BOARDS
         or meta.get("size") != FLASH_SIZE
@@ -78,6 +78,9 @@ def execute(args):
         )
     if args.operation in ("backup", "restore") and not args.file:
         raise ValueError("backup/restore requires --file PATH")
+    # Refuse before the multi-minute flash read rather than after it.
+    if args.operation == "backup" and Path(args.file).exists():
+        raise ValueError(f"{args.file} already exists; choose a new backup file")
     backup_input = Path(args.file).read_bytes() if args.operation == "restore" else None
     esp = esptool.detect_chip(args.port, 115200)
     try:
@@ -151,9 +154,10 @@ def execute(args):
             # upload it a second time (overlapping RAM raises FatalError).
             esp.sync_stub_detected = True
             esptool.main(command, esp=esp)
+            # The stub hashes each range on the device, so nothing is read back over USB.
             for address, file in files:
                 data = file.read_bytes()
-                if sha(esp.read_flash(address, len(data))) != sha(data):
+                if esp.flash_md5sum(address, len(data)) != hashlib.md5(data).hexdigest():
                     raise ValueError(
                         f"Read-back verification failed at {address:#x}. Retry USB recovery"
                     )

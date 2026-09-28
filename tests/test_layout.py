@@ -101,6 +101,25 @@ class LayoutTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_manifest(broken)
 
+    def test_firmware_boundaries_match_partition_table(self):
+        import re
+
+        root = Path(__file__).resolve().parents[1]
+        by_name = {p["name"]: (p["offset"], p["size"]) for p in partitions()}
+        header = (root / "include/storage_boundary.h").read_text()
+        ranges = [
+            (int(start, 16), int(size, 16))
+            for start, size in re.findall(r"contains\((0x[0-9a-f]+),\s*(0x[0-9a-f]+)", header)
+        ]
+        # storage_write_allowed lists MeshCore's regions, then Meshtastic's.
+        self.assertEqual(ranges, [by_name[n] for n in ("mc_nvs", "mc_fs", "mt_nvs", "mt_fs")])
+        integration = (root / "scripts/firmware/integration.cpp").read_text()
+        otadata = tuple(
+            int(re.search(rf"{name} = (0x[0-9a-f]+);", integration).group(1), 16)
+            for name in ("ota_data_offset", "ota_data_size")
+        )
+        self.assertEqual(otadata, by_name["otadata"])
+
     def test_partition_table_md5(self):
         table = partition_binary()
         self.assertEqual(len(table), 4096)

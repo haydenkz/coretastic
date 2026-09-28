@@ -1,3 +1,4 @@
+import hashlib
 import sys
 import unittest
 from pathlib import Path
@@ -104,6 +105,9 @@ class FlashTests(unittest.TestCase):
             def read_flash(self, address, size):
                 return self.written[address][:size]
 
+            def flash_md5sum(self, address, size):
+                return hashlib.md5(self.written[address][:size]).hexdigest()
+
         device = Device()
 
         def write_flash(command, esp):
@@ -145,6 +149,22 @@ class FlashTests(unittest.TestCase):
 
         self.assertEqual(device.assert_size, FLASH_SIZE)
         self.assertEqual(device.assert_baud, 460800)
+        self.assertIn(0xE000, device.written)
+
+    def test_backup_refuses_existing_file_before_connecting(self):
+        import tempfile
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as temp:
+            file = Path(temp) / "backup.ctbackup"
+            file.write_bytes(b"previous")
+            args = SimpleNamespace(operation="backup", file=file, port="test", board=BOARD)
+            esptool = SimpleNamespace(detect_chip=lambda *args: self.fail("Device opened"))
+            with patch.dict(sys.modules, {"esptool": esptool}):
+                with self.assertRaisesRegex(ValueError, "already exists"):
+                    execute(args)
+            self.assertEqual(file.read_bytes(), b"previous")
 
     def test_plan_checks_layout_and_bootloader(self):
         m = manifest_fixture()
@@ -180,3 +200,6 @@ class FlashTests(unittest.TestCase):
         broken[4097] ^= 1
         with self.assertRaises(ValueError):
             read_backup(broken, "aa:bb:cc:dd:ee:ff", BOARD)
+        for header in (b"not json", b"[]", b'{"format": "coretastic-backup-v1", "mac": 1}'):
+            with self.assertRaisesRegex(ValueError, "metadata"):
+                read_backup(header.ljust(4096, b"\0") + flash, "aa:bb:cc:dd:ee:ff", BOARD)

@@ -10,6 +10,7 @@ constexpr int ESP_OK = 0, ESP_ERR_INVALID_STATE = 1, ESP_ERR_NOT_SUPPORTED = 2,
     if ((x) != ESP_OK)                                                                             \
       abort();                                                                                     \
   } while (0)
+#define ESP_LOGE(tag, format, ...) ((void)(tag))
 struct esp_flash_t {};
 struct esp_partition_t {};
 extern esp_flash_t *esp_flash_default_chip;
