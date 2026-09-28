@@ -1,0 +1,148 @@
+name: Upstream sync
+
+# Daily: adopt new stable MeshCore/Meshtastic releases into a pull request.
+# Nothing is merged or released automatically; a person reviews every version.
+on:
+  schedule:
+    - cron: "23 7 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: upstream-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Sync ${{ matrix.component }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      pull-requests: write
+    strategy:
+      fail-fast: false
+      matrix:
+        component: [meshcore, meshtastic]
+    env:
+      COMPONENT: ${{ matrix.component }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+          fetch-depth: 0
+          # Pull requests opened with the default token do not trigger CI; an
+          # UPSTREAM_SYNC_TOKEN secret (fine-grained PAT or app token) does.
+          token: ${{ secrets.UPSTREAM_SYNC_TOKEN || github.token }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: python -m pip install -r requirements.txt
+      - name: Look for new stable releases
+        id: sync
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python scripts/firmware/sync_upstream.py "$COMPONENT" --summary "$RUNNER_TEMP/sync.json"
+          python - >> "$GITHUB_OUTPUT" <<'PY'
+          import json, os
+          summary = json.load(open(os.path.join(os.environ["RUNNER_TEMP"], "sync.json")))
+          adopted = summary["adopted"]
+          print("adopted=" + " ".join(adopted))
+          print("attention=" + ("true" if summary["attention"] else "false"))
+          print(f"branch=upstream-sync/{summary['component']}-{adopted[0] if adopted else 'none'}")
+          PY
+      - name: Skip versions that already have a branch or pull request
+        id: existing
+        if: steps.sync.outputs.adopted != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ steps.sync.outputs.branch }}
+        run: |
+          # A closed pull request with its branch kept declines that version.
+          prs=$(gh pr list --head "$BRANCH" --state all --json number --jq length)
+          if git ls-remote --exit-code --heads origin "$BRANCH" > /dev/null || [ "$prs" != 0 ]; then
+            echo "$BRANCH already exists; nothing to do."
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Cache PlatformIO packages
+        if: steps.existing.outputs.proceed == 'true'
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: platformio-${{ runner.os }}-${{ hashFiles('platformio.ini', 'requirements.txt') }}
+          restore-keys: |
+            platformio-${{ runner.os }}-
+      - name: Host tests
+        id: tests
+        if: steps.existing.outputs.proceed == 'true'
+        continue-on-error: true
+        run: python scripts/device/test.py
+      - name: Build new versions for every board and check isolation links
+        id: build
+        if: steps.existing.outputs.proceed == 'true' && steps.sync.outputs.attention == 'false'
+        continue-on-error: true
+        env:
+          VERSIONS: ${{ steps.sync.outputs.adopted }}
+        run: |
+          for version in $VERSIONS; do
+            python scripts/firmware/build.py "$COMPONENT" --version "$version"
+            python scripts/release/validate_release.py --build "$COMPONENT" "$version"
+          done
+      - name: Open pull request
+        if: steps.existing.outputs.proceed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.UPSTREAM_SYNC_TOKEN || github.token }}
+          BRANCH: ${{ steps.sync.outputs.branch }}
+          VERSIONS: ${{ steps.sync.outputs.adopted }}
+          ATTENTION: ${{ steps.sync.outputs.attention }}
+          TESTS: ${{ steps.tests.outcome }}
+          BUILD: ${{ steps.build.outcome }}
+          BASE: ${{ github.event.repository.default_branch }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$BRANCH"
+          git add upstream-lock.json "$COMPONENT/upstream" "$COMPONENT/versions"
+          git commit -m "Adopt $COMPONENT $VERSIONS"
+          git push origin "$BRANCH"
+          python - > "$RUNNER_TEMP/body.md" <<'PY'
+          import json, os
+          env = os.environ
+          summary = json.load(open(os.path.join(env["RUNNER_TEMP"], "sync.json")))
+          outcome = {"success": "passed", "failure": "**failed**", "skipped": "skipped"}
+          build = outcome.get(env["BUILD"], env["BUILD"])
+          if env["BUILD"] == "skipped":
+              build += " (fix the items below first, then push to this branch)"
+          notes = [
+              f"- [{v} release notes]({summary['repository']}/releases/tag/{v})"
+              for v in summary["adopted"]
+          ]
+          print(f"""Automated sync found a new stable {summary['component']} release.
+
+          {summary['report']}
+
+          ## Automated checks
+          - Host tests: {outcome.get(env['TESTS'], env['TESTS'])}
+          - Build for every board + isolation link check: {build}
+          {chr(10).join(f'- Needs attention: {item}' for item in summary['attention'])}
+
+          ## Before merging
+          {chr(10).join(notes)}
+          - [ ] Read the release notes for changes to storage, BLE, or radio behaviour
+          - [ ] Each board's upstream target still supports its hardware (for example both Heltec V4.2 and V4.3 LoRa front ends)
+          - [ ] If a patch needed rebasing or pins changed, update this branch and rerun CI
+          - [ ] Test on hardware where possible: switching, radio, and pairing
+
+          Merging only adds this version to the next release; nothing ships until a release is tagged.""")
+          PY
+          draft=()
+          if [ "$ATTENTION" = true ] || [ "$TESTS" != success ] || [ "$BUILD" != success ]; then
+            draft=(--draft)
+          fi
+          gh pr create --base "$BASE" --head "$BRANCH" --title "Adopt $COMPONENT $VERSIONS" \
+            --body-file "$RUNNER_TEMP/body.md" "${draft[@]}"
