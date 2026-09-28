@@ -16,8 +16,8 @@
 namespace {
 constexpr bool meshcore = CORETASTIC_MESHCORE;
 constexpr const char *nvs_label = meshcore ? "mc_nvs" : "mt_nvs";
-constexpr uint32_t ota_data_offset = 0xe000;
-constexpr size_t ota_data_size = 0x2000;
+constexpr uint32_t ota_data_offset = coretastic::kOtaDataOffset;
+constexpr size_t ota_data_size = coretastic::kOtaDataSize;
 bool boot_handoff = false;
 bool writable(uint32_t address, size_t size) {
   return coretastic::storage_write_allowed(meshcore, address, size);
@@ -103,7 +103,7 @@ esp_err_t __wrap_spi_flash_erase_range(size_t address, size_t size) {
   return __wrap_esp_flash_erase_region(nullptr, address, size);
 }
 esp_err_t __wrap_spi_flash_erase_sector(size_t sector) {
-  if (sector >= 0x1000)
+  if (sector >= coretastic::kFlashSize / 4096)
     return ESP_ERR_INVALID_ARG;
   return __wrap_esp_flash_erase_region(nullptr, sector * 4096, 4096);
 }

@@ -7,7 +7,7 @@
 /sdkconfig
 /sdkconfig.old
 /sdkconfig.*.old
-/sdkconfig.selector
+/sdkconfig.selector*
 /release/
 /build/
 

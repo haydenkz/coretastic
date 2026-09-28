@@ -97,7 +97,7 @@ int main() {
   assert(__wrap_nvs_open_from_partition("nvs", "ble", 0, nullptr) == ESP_OK && last_nvs == owner);
   assert(__wrap_nvs_open_from_partition("selector_nvs", "boot", 0, nullptr) != ESP_OK);
   assert(__wrap_nvs_flash_erase_partition(CORETASTIC_MESHCORE ? "mt_nvs" : "mc_nvs") != ESP_OK);
-  for (uint32_t address = 0; address < 0x1000000; address += 4096) {
+  for (uint32_t address = 0; address < coretastic::kFlashSize; address += 4096) {
     const bool allowed = coretastic::storage_write_allowed(CORETASTIC_MESHCORE, address, 4096);
     assert((__wrap_spi_flash_write(address, nullptr, 4096) == ESP_OK) == allowed);
     assert((__wrap_spi_flash_erase_sector(address / 4096) == ESP_OK) == allowed);

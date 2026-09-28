@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Assemble a validated release from the selector and every locked app version build."""
+"""Assemble a validated release: the selector and every locked app version, per board."""
 
 import argparse
 import json
@@ -14,19 +14,19 @@ sys.path[:0] = [str(_scripts / "device"), str(_scripts / "firmware")]
 
 from layout import (
     APPS,
-    BOARDS,
-    FLASH_SIZE,
-    LAYOUT_ID,
     MANIFEST_SCHEMA,
     ROOT,
     STORAGE_EPOCH,
+    board_file,
+    boards,
+    flash_size,
     partition,
     partition_binary,
     partitions,
     sha,
     validate_manifest,
 )
-from prepare import build_dir, input_digest, lock
+from prepare import build_dir, environment, input_digest, lock
 
 
 def one(directory, pattern):
@@ -36,15 +36,16 @@ def one(directory, pattern):
     return paths[0]
 
 
+def image(output, board_id, name, data, offset):
+    path = output / board_file(board_id, name)
+    path.write_bytes(data)
+    return dict(file=path.name, offset=offset, size=len(data), sha256=sha(data))
+
+
 def package(version, output):
     output.mkdir(parents=True, exist_ok=False)
     locked = lock()
-    selector_build = ROOT / ".pio/build/selector"
-    builds = [("selector", selector_build)]
-    apps = {}
     for component in APPS:
-        environment = locked[component]["environment"]
-        apps[component] = []
         for record in locked[component]["versions"]:
             directory = build_dir(component, record["version"])
             actual = subprocess.check_output(
@@ -57,57 +58,70 @@ def package(version, output):
                 component, record["version"]
             ):
                 raise ValueError(f"{directory}: integration inputs changed; rebuild first")
-            firmware = directory / ".pio/build" / environment
-            builds.append((f"{component}-{record['version']}", firmware))
-            apps[component].append((record, firmware))
-    for label, directory in builds:
-        if (directory / "partitions.bin").read_bytes().ljust(4096, b"\xff") != partition_binary():
-            raise ValueError(f"{label}: built partition table differs")
-    images = {}
-    shared = {
-        "selector": (selector_build / "firmware.bin", partition("selector")["offset"]),
-        "bootloader": (selector_build / "bootloader.bin", 0),
-        "partitions": (None, 0x8000),
-    }
-    for name, (source, offset) in shared.items():
-        data = partition_binary() if source is None else source.read_bytes()
-        path = output / f"{name}.bin"
-        path.write_bytes(data)
-        images[name] = dict(file=path.name, offset=offset, size=len(data), sha256=sha(data))
-    manifest_apps = {}
-    for component, entries in apps.items():
-        manifest_apps[component] = []
-        for record, firmware in entries:
-            # Meshtastic names its image after the upstream version; MeshCore does not.
-            source = (
-                one(firmware, "firmware-*.elf").with_suffix(".bin")
-                if component == "meshtastic"
-                else firmware / "firmware.bin"
-            )
-            data = source.read_bytes()
-            path = output / f"{component}-{record['version']}.bin"
-            path.write_bytes(data)
-            manifest_apps[component].append(
-                dict(
-                    version=record["version"],
-                    commit=record["commit"],
-                    file=path.name,
-                    offset=partition(component)["offset"],
-                    size=len(data),
-                    sha256=sha(data),
+    releases = {}
+    builds = []  # (metadata label, board, PlatformIO build directory)
+    for board_id, profile in boards().items():
+        selector_build = ROOT / ".pio/build" / f"selector-{board_id}"
+        builds.append((f"{board_id}-selector", board_id, selector_build))
+        images = dict(
+            selector=image(
+                output,
+                board_id,
+                "selector",
+                (selector_build / "firmware.bin").read_bytes(),
+                partition(board_id, "selector")["offset"],
+            ),
+            bootloader=image(
+                output, board_id, "bootloader", (selector_build / "bootloader.bin").read_bytes(), 0
+            ),
+            partitions=image(output, board_id, "partitions", partition_binary(board_id), 0x8000),
+        )
+        apps = {}
+        for component in APPS:
+            apps[component] = []
+            for record in locked[component]["versions"]:
+                firmware = (
+                    build_dir(component, record["version"])
+                    / ".pio/build"
+                    / environment(component, board_id)
                 )
-            )
+                builds.append((f"{board_id}-{component}-{record['version']}", board_id, firmware))
+                # Meshtastic names its image after the upstream version; MeshCore does not.
+                source = (
+                    one(firmware, "firmware-*.elf").with_suffix(".bin")
+                    if component == "meshtastic"
+                    else firmware / "firmware.bin"
+                )
+                name = f"{component}-{record['version']}"
+                entry = image(
+                    output,
+                    board_id,
+                    name,
+                    source.read_bytes(),
+                    partition(board_id, component)["offset"],
+                )
+                apps[component].append(
+                    dict(version=record["version"], commit=record["commit"], **entry)
+                )
+        releases[board_id] = dict(
+            name=profile["name"],
+            experimental=profile["experimental"],
+            layout=profile["layout"],
+            flash_size=flash_size(board_id),
+            partitions=partitions(board_id),
+            images=images,
+            apps=apps,
+        )
+    for label, board_id, directory in builds:
+        built = (directory / "partitions.bin").read_bytes().ljust(4096, b"\xff")
+        if built != partition_binary(board_id):
+            raise ValueError(f"{label}: built partition table differs")
     manifest = dict(
         schema=MANIFEST_SCHEMA,
         version=version,
-        layout=LAYOUT_ID,
         chip="ESP32-S3",
-        flash_size=FLASH_SIZE,
-        boards=BOARDS,
-        partitions=partitions(),
         storage_epoch=STORAGE_EPOCH,
-        images=images,
-        apps=manifest_apps,
+        boards=releases,
         repositories={component: locked[component]["repository"] for component in APPS},
         source_commit=subprocess.check_output(
             ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True
@@ -122,7 +136,7 @@ def package(version, output):
     )
     metadata = output / "build-metadata"
     metadata.mkdir()
-    for label, directory in builds:
+    for label, _, directory in builds:
         for pattern in ["*.elf", "*.map"]:
             for path in directory.glob(pattern):
                 shutil.copy2(path, metadata / f"{label}-{path.name}")

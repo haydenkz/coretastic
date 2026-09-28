@@ -1,0 +1,13 @@
+{
+  "name": "Heltec WiFi LoRa 32 V3",
+  "experimental": true,
+  "layout": "heltec-v3-dual-v1",
+  "flash_size": 8388608,
+  "usb": ["10c4:ea60"],
+  "backup_aliases": [],
+  "legacy_versions": {},
+  "environments": {
+    "meshcore": "Heltec_v3_companion_radio_ble",
+    "meshtastic": "heltec-v3"
+  }
+}

@@ -27,7 +27,10 @@ symbols = [
     "spi_flash_write_encrypted",
 ]
 env.Append(LINKFLAGS=["-Wl,--wrap=" + symbol for symbol in symbols])
-env.Append(CPPPATH=[str(Path(env["PROJECT_DIR"]) / "coretastic")])
+# The write guard's partition bounds come from this board's generated layout header.
+integration = Path(env["PROJECT_DIR"]) / "coretastic"
+board = env.GetProjectOption("custom_coretastic_board")
+env.Append(CPPPATH=[str(integration), str(integration / "boards" / board)])
 # The --wrap entry points are reached through Xtensa call8, which requires a
 # 4-byte aligned target. Meshtastic links with LTO, which ignores the aligned(4)
 # function attribute, so build this library without LTO and with explicit
@@ -46,5 +49,5 @@ if any("upload" in target for target in COMMAND_LINE_TARGETS):
         "Use scripts/device/flash.py with the release manifest; upstream upload targets are disabled"
     )
 
-if env["PIOENV"] == "coretastic-meshtastic":
+if env["PIOENV"].startswith("coretastic-meshtastic-"):
     env.Append(LINKFLAGS=["--specs=nano.specs", "-u", "_printf_float"])

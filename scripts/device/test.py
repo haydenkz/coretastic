@@ -17,32 +17,42 @@ def main():
     output = ROOT / ".build/tests"
     output.mkdir(parents=True, exist_ok=True)
     run(sys.executable, "-m", "unittest", "discover", "-s", "tests", "-v")
-    for test, flags in [
-        ("selector", []),
-        ("oled", []),
-        ("integration-mc", ["-DCORETASTIC_MESHCORE=1"]),
-        ("integration-mt", ["-DCORETASTIC_MESHCORE=0"]),
-        (
-            "integration-retry",
-            ["-DCORETASTIC_MESHCORE=0", "-DCORETASTIC_HANDOFF_OTA_FAILURE=1"],
-        ),
-    ]:
-        source = test.split("-")[0]
-        binary = output / test
-        run(
-            os.environ.get("CXX", "c++"),
-            "-std=c++17",
-            "-Wall",
-            "-Wextra",
-            "-Werror",
-            "-Iinclude",
-            "-Itests/idf_stubs",
-            *flags,
-            f"tests/{source}_test.cpp",
-            "-o",
-            str(binary),
-        )
-        run(str(binary))
+    sys.path.insert(0, str(ROOT / "scripts/device"))
+    from layout import boards, layout_header
+
+    for board in boards():
+        # The write guard reads its partition bounds from a generated header.
+        layout = output / board
+        layout.mkdir(exist_ok=True)
+        (layout / "coretastic_layout.h").write_text(layout_header(board))
+        for test, flags in [
+            ("selector", []),
+            ("oled", []),
+            ("integration-mc", ["-DCORETASTIC_MESHCORE=1"]),
+            ("integration-mt", ["-DCORETASTIC_MESHCORE=0"]),
+            (
+                "integration-retry",
+                ["-DCORETASTIC_MESHCORE=0", "-DCORETASTIC_HANDOFF_OTA_FAILURE=1"],
+            ),
+        ]:
+            source = test.split("-")[0]
+            binary = layout / test
+            run(
+                os.environ.get("CXX", "c++"),
+                "-std=c++17",
+                "-Wall",
+                "-Wextra",
+                "-Werror",
+                "-Iinclude",
+                "-Itests/idf_stubs",
+                f"-I{layout}",
+                *flags,
+                f"tests/{source}_test.cpp",
+                "-o",
+                str(binary),
+            )
+            print(f"{board}: {test}", flush=True)
+            run(str(binary))
 
 
 if __name__ == "__main__":
