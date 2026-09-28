@@ -8,12 +8,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-# Tooling lives in sibling packages under scripts/; resolve them for direct
-# invocation as well as package import.
-for _tooling in ["scripts/device", "scripts/firmware"]:
-    _tooling_path = Path(__file__).resolve().parents[2] / _tooling
-    if str(_tooling_path) not in sys.path:
-        sys.path.insert(0, str(_tooling_path))
+# Release tooling imports modules from the sibling scripts/ directories.
+_scripts = Path(__file__).resolve().parents[1]
+sys.path[:0] = [str(_scripts / "device"), str(_scripts / "firmware")]
 
 from layout import (
     BOARDS,
