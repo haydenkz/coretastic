@@ -31,10 +31,15 @@ def main():
         "__wrap_spi_flash_write",
         "__wrap_esp_ota_begin",
     ]
-    for component in ["meshcore", "meshtastic"]:
-        maps = list(metadata.glob(component + "-*.map"))
+    builds = [
+        (component, f"{component} {entry['version']}", f"{component}-{entry['version']}-*.map")
+        for component, entries in manifest["apps"].items()
+        for entry in entries
+    ]
+    for component, label, pattern in builds:
+        maps = list(metadata.glob(pattern))
         if len(maps) != 1:
-            raise ValueError(f"Expected one linker map for {component}")
+            raise ValueError(f"Expected one linker map for {label}")
         content = maps[0].read_text()
         for symbol in required:
             # The cross-reference table includes both linked and garbage-collected functions.
@@ -52,11 +57,9 @@ def main():
                     "__wrap_esp_flash_erase_region",
                 ] or (symbol == "__wrap_nvs_get_stats" and component == "meshtastic")
                 if live:
-                    raise ValueError(
-                        f"{component}: required live isolation symbol missing: {symbol}"
-                    )
+                    raise ValueError(f"{label}: required live isolation symbol missing: {symbol}")
                 if symbol not in content:
-                    raise ValueError(f"{component}: isolation wrapper absent from link: {symbol}")
+                    raise ValueError(f"{label}: isolation wrapper absent from link: {symbol}")
     print(
         f"Validated all images, partition boundaries, and isolation links for {manifest['version']}"
     )

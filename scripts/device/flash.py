@@ -9,7 +9,21 @@ import sys
 import tempfile
 from pathlib import Path
 
-from layout import BOARDS, FLASH_SIZE, load_manifest, partition_binary, sha
+from layout import (
+    APPS,
+    BOARDS,
+    FLASH_SIZE,
+    SECTOR,
+    SETTINGS,
+    app_record,
+    installed_version,
+    load_manifest,
+    partition,
+    partition_binary,
+    record_offset,
+    settings_erase_required,
+    sha,
+)
 
 COMPATIBLE_BACKUP_BOARDS = {*BOARDS, "heltec-v4.2-oled", "heltec-v4.3-oled"}
 
@@ -50,7 +64,21 @@ def read_backup(data, mac, board):
     return flash
 
 
-def plan(manifest, operation, read):
+def select_app(manifest, component, version=None):
+    """Returns the manifest entry for a version, defaulting to the newest."""
+    entries = manifest["apps"][component]
+    if version is None:
+        return entries[0]
+    for entry in entries:
+        if entry["version"] == version:
+            return entry
+    available = ", ".join(entry["version"] for entry in entries)
+    raise ValueError(f"{component} {version} is not in this release; available: {available}")
+
+
+def plan(manifest, operation, read, versions=None, erase_settings=False):
+    """Returns (offset, source) writes; a source is a manifest image or raw bytes."""
+    versions = versions or {}
     if operation != "install":
         if read(0x8000, 4096) != partition_binary():
             raise ValueError("Incompatible installed layout: back up, then use install --erase")
@@ -58,13 +86,33 @@ def plan(manifest, operation, read):
             boot = manifest["images"]["bootloader"]
             if sha(read(0, boot["size"])) != boot["sha256"]:
                 raise ValueError("Bootloader differs: run recovery first")
-    return (
-        ["meshcore", "meshtastic", "selector", "partitions", "bootloader"]
-        if operation == "install"
-        else ["selector", "partitions", "bootloader"]
-        if operation == "recovery"
-        else [operation]
-    )
+    writes = []
+    for component in APPS if operation == "install" else [operation] if operation in APPS else []:
+        entry = select_app(manifest, component, versions.get(component))
+        writes.append((entry["offset"], entry))
+        record = app_record(component, entry["version"], entry["sha256"])
+        writes.append((record_offset(component), record))
+        if operation == "install":
+            continue  # The whole chip is erased.
+        installed = installed_version(component, read(record_offset(component), SECTOR))
+        required = settings_erase_required(installed, entry["version"])
+        if required and not erase_settings:
+            raise ValueError(
+                f"{component}: {entry['version']} is older than the installed "
+                f"{installed or 'unidentified version'}, so its settings must be erased. "
+                "Back up, then rerun with --erase-settings"
+            )
+        if erase_settings:
+            for name in SETTINGS[component]:
+                part = partition(name)
+                writes.append((part["offset"], b"\xff" * part["size"]))
+    shared = {"install": ["selector", "partitions", "bootloader"], "selector": ["selector"]}
+    shared["recovery"] = shared["install"]
+    for name in shared.get(operation, []):
+        writes.append((manifest["images"][name]["offset"], manifest["images"][name]))
+    # Erased OTA metadata returns to the factory selector after a USB operation.
+    writes.append((0xE000, b"\xff" * 8192))
+    return writes
 
 
 def execute(args):
@@ -72,6 +120,10 @@ def execute(args):
 
     # Validate the entire bundle before opening the device or issuing any command.
     manifest = None if args.operation in ("backup", "restore") else load_manifest(args.manifest)
+    versions = {component: getattr(args, f"{component}_version", None) for component in APPS}
+    if manifest:
+        for component, version in versions.items():
+            select_app(manifest, component, version)
     if args.operation in ("install", "restore") and not args.erase:
         raise ValueError(
             "This operation overwrites all flash. Download a backup, then supply --erase"
@@ -117,20 +169,21 @@ def execute(args):
                 path.write_bytes(data)
                 files = [(0, path)]
             else:
-                names = plan(manifest, args.operation, esp.read_flash)
+                erase_settings = getattr(args, "erase_settings", False)
+                writes = plan(manifest, args.operation, esp.read_flash, versions, erase_settings)
                 # Snapshot validated bytes to prevent source files changing during write.
                 files = []
-                for name in names:
-                    image = manifest["images"][name]
-                    data = (args.manifest.parent / image["file"]).read_bytes()
-                    if sha(data) != image["sha256"]:
-                        raise ValueError("Bundle changed after validation")
-                    path = directory / image["file"]
+                for offset, source in writes:
+                    if isinstance(source, dict):
+                        data = (args.manifest.parent / source["file"]).read_bytes()
+                        if sha(data) != source["sha256"]:
+                            raise ValueError("Bundle changed after validation")
+                        print(f"Writing {source['file']} at {offset:#x}")
+                    else:
+                        data = source
+                    path = directory / f"{offset:08x}.bin"
                     path.write_bytes(data)
-                    files.append((image["offset"], path))
-                ota = directory / "otadata.bin"
-                ota.write_bytes(b"\xff" * 8192)
-                files.append((0xE000, ota))
+                    files.append((offset, path))
             command = [
                 "--port",
                 args.port,
@@ -194,6 +247,18 @@ def main():
     )
     parser.add_argument("--manifest", type=Path, default=Path("release/manifest.json"))
     parser.add_argument("--file", type=Path)
+    parser.add_argument(
+        "--meshcore-version", help="MeshCore version to install (default: newest in the release)"
+    )
+    parser.add_argument(
+        "--meshtastic-version",
+        help="Meshtastic version to install (default: newest in the release)",
+    )
+    parser.add_argument(
+        "--erase-settings",
+        action="store_true",
+        help="Erase the updated app's settings; required when installing an older version",
+    )
     parser.add_argument(
         "--erase", action="store_true", help="Acknowledge destructive full installation/restore"
     )

@@ -5,7 +5,18 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts" / "device"))
 from flash import execute, make_backup, plan, read_backup
-from layout import BOARD, BOARDS, FLASH_SIZE, partition_binary, sha
+from layout import (
+    BOARD,
+    BOARDS,
+    FLASH_SIZE,
+    SECTOR,
+    app_record,
+    installed_version,
+    partition,
+    partition_binary,
+    record_offset,
+    sha,
+)
 from test_layout import image_fixture, manifest_fixture
 
 
@@ -121,7 +132,9 @@ class FlashTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             directory = Path(temp)
             manifest = manifest_fixture()
-            for name, image in manifest["images"].items():
+            images = list(manifest["images"].items())
+            images += [(c, e) for c, entries in manifest["apps"].items() for e in entries]
+            for name, image in images:
                 data = partition_binary() if name == "partitions" else image_fixture()
                 (directory / image["file"]).write_bytes(data)
                 image["size"] = len(data)
@@ -135,6 +148,8 @@ class FlashTests(unittest.TestCase):
                 board=BOARD,
                 manifest=manifest_path,
                 erase=True,
+                meshcore_version="companion-v1.16.0",
+                meshtastic_version=None,
             )
             with patch.dict(
                 sys.modules,
@@ -150,6 +165,14 @@ class FlashTests(unittest.TestCase):
         self.assertEqual(device.assert_size, FLASH_SIZE)
         self.assertEqual(device.assert_baud, 460800)
         self.assertIn(0xE000, device.written)
+        self.assertEqual(
+            installed_version("meshcore", device.written[record_offset("meshcore")]),
+            "companion-v1.16.0",
+        )
+        self.assertEqual(
+            installed_version("meshtastic", device.written[record_offset("meshtastic")]),
+            "v2.7.26.54e0d8d",
+        )
 
     def test_backup_refuses_existing_file_before_connecting(self):
         import tempfile
@@ -173,17 +196,53 @@ class FlashTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Bootloader"):
             plan(m, "meshtastic", lambda a, n: partition_binary() if a == 0x8000 else b"\xff" * n)
         self.assertEqual(
-            plan(m, "recovery", lambda a, n: partition_binary()),
-            ["selector", "partitions", "bootloader"],
+            [offset for offset, _ in plan(m, "recovery", lambda a, n: partition_binary())],
+            [0x10000, 0x8000, 0, 0xE000],
         )
+        writes = plan(m, "install", lambda a, n: self.fail("Install must not require a layout"))
         self.assertEqual(
-            len(
-                plan(
-                    m, "install", lambda a, n: self.fail("Install must not require existing layout")
-                )
-            ),
-            5,
+            [offset for offset, _ in writes],
+            [0x100000, 0x3FF000, 0x400000, 0x9FF000, 0x10000, 0x8000, 0, 0xE000],
         )
+        self.assertEqual(writes[0][1]["version"], "companion-v1.17.1", "defaults to newest")
+
+    def test_plan_selects_versions_and_guards_downgrades(self):
+        m = manifest_fixture()
+
+        def device(installed):
+            def read(address, size):
+                if address == 0x8000:
+                    return partition_binary()
+                if address == 0:
+                    return b"\xff" * size
+                if address == record_offset("meshcore"):
+                    return installed
+                raise AssertionError(f"Unexpected read at {address:#x}")
+
+            return read
+
+        m["images"]["bootloader"]["sha256"] = sha(b"\xff" * 336)
+        newest = device(app_record("meshcore", "companion-v1.17.1", "a" * 64))
+        with self.assertRaisesRegex(ValueError, "not in this release.*companion-v1.17.1"):
+            plan(m, "meshcore", newest, dict(meshcore="companion-v9.9.9"))
+        with self.assertRaisesRegex(ValueError, "older than the installed companion-v1.17.1"):
+            plan(m, "meshcore", newest, dict(meshcore="companion-v1.16.0"))
+        downgrade = plan(m, "meshcore", newest, dict(meshcore="companion-v1.16.0"), True)
+        erased = {offset: data for offset, data in downgrade if isinstance(data, bytes)}
+        for name in ("mc_nvs", "mc_fs"):
+            self.assertEqual(erased[partition(name)["offset"]], b"\xff" * partition(name)["size"])
+        self.assertNotIn(partition("mt_nvs")["offset"], erased)
+        self.assertEqual(
+            installed_version("meshcore", erased[record_offset("meshcore")]), "companion-v1.16.0"
+        )
+        # Upgrading keeps settings; an unreadable record is treated as a downgrade.
+        legacy = device(b"\xff" * SECTOR)
+        upgrade = plan(m, "meshcore", legacy, dict(meshcore="companion-v1.17.1"))
+        self.assertEqual(
+            [offset for offset, _ in upgrade], [0x100000, record_offset("meshcore"), 0xE000]
+        )
+        with self.assertRaisesRegex(ValueError, "unidentified version"):
+            plan(m, "meshcore", device(b"garbage".ljust(SECTOR, b"\0")))
 
     def test_backup_identity_and_integrity(self):
         flash = bytearray(b"\xff" * FLASH_SIZE)

@@ -6,7 +6,7 @@
 
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
 [![Board](https://img.shields.io/badge/board-Heltec%20V4.2%2FV4.3%20OLED-informational)](#supported-hardware)
-[![MeshCore](https://img.shields.io/badge/MeshCore-companion--v1.17.0-2f8f5f)](#supported-hardware)
+[![MeshCore](https://img.shields.io/badge/MeshCore-companion--v1.16.0%20to%20v1.17.1-2f8f5f)](#supported-hardware)
 [![Meshtastic](https://img.shields.io/badge/Meshtastic-v2.7.26.54e0d8d-67b168)](#supported-hardware)
 
 [CLI flasher](#command-line-flasher) · [Build & test](#building-and-testing)
@@ -30,13 +30,13 @@ Each firmware occupies a fixed flash slot with separate settings and Bluetooth i
 
 | Board | Flash | Target firmware |
 | --- | --- | --- |
-| Heltec WiFi LoRa 32 **V4.2 / V4.3 OLED** | 16 MiB | MeshCore `companion-v1.17.0`, Meshtastic `v2.7.26.54e0d8d` |
+| Heltec WiFi LoRa 32 **V4.2 / V4.3 OLED** | 16 MiB | MeshCore `companion-v1.17.1`, `companion-v1.17.0`, `companion-v1.16.0`; Meshtastic `v2.7.26.54e0d8d` |
 
 Not supported: V3, V4 R8, and TFT variants. USB cannot identify the PCB family — the flasher checks the ESP32-S3 and physical flash size, and you confirm the board.
 
 Secure Boot and flash encryption must be **disabled**; the flasher rejects enabled devices.
 
-Pinned application revisions are recorded in [`upstream-lock.json`](upstream-lock.json).
+Each release offers the latest stable upstream versions that support both the V4.2 and V4.3 LoRa front end, up to three per app. You choose a version when you install or update; the newest is the default. Older Meshtastic stable releases (such as `v2.7.15`) only drive the V4.2 front end, so they are not offered. Pinned revisions are recorded in [`upstream-lock.json`](upstream-lock.json).
 
 ## Install and switch
 
@@ -51,7 +51,7 @@ Keep the flasher and firmware bundle from the **same Coretastic build**. Do not 
 
 ### Backup, updates, recovery
 
-- **Component update** — write only the selected app and boot metadata, preserving all settings.
+- **Component update** — write only the selected app version and boot metadata, preserving all settings. Installing an *older* version than the one on the device erases that app's settings (and only that app's), because older firmware may not read what a newer one saved; the flasher requires you to confirm this.
 - **Full backup** — read the entire 16 MiB flash into a `.ctbackup` file (includes keys and pairings).
 - **Restore** — overwrite the full flash after matching checksums, board, MAC, and partition layout.
 - **Selector/bootloader recovery** — repair shared boot files while preserving both apps and their settings.
@@ -84,6 +84,10 @@ python scripts/device/flash.py recovery --port /dev/ttyACM0 --board heltec-v4-ol
 python scripts/device/flash.py restore --port /dev/ttyACM0 --board heltec-v4-oled --file before.ctbackup --erase
 ```
 
+`install` and app updates use the newest version in the release unless you pass `--meshcore-version` or `--meshtastic-version` (for example `--meshcore-version companion-v1.16.0`); an unknown version lists the available ones. Installing an older app version also needs `--erase-settings`.
+
+The flasher records each app's installed version in the last 4 KiB of its partition. Devices flashed by Coretastic v0.1.0 have no record and are treated as running the versions that release shipped (MeshCore `companion-v1.17.0`, Meshtastic `v2.7.26.54e0d8d`).
+
 Use the matching COM port on Windows or `/dev/cu.*` on macOS. Logs append to `coretastic-flash.log` (or `--log`); the web interface downloads its own log.
 
 ## Building and testing
@@ -113,7 +117,14 @@ mkdir -p web/public/releases && cp release/*.bin release/manifest.json release/S
 npm run build --prefix web
 ```
 
-`release/` must not already exist when packaging. Builds use disposable `.build/` checkouts with patches applied in filename order; upstream submodules stay unchanged.
+`release/` must not already exist when packaging. `build.py all` builds the selector and every locked app version; `build.py meshcore --version companion-v1.16.0` builds one. Builds use disposable `.build/<app>/<version>/` checkouts with that version's patches applied in filename order; upstream submodules stay unchanged apart from fetched commits.
+
+### Adding an upstream version
+
+1. Confirm the version is a stable upstream release whose Heltec V4 target drives both front ends (GC1109 on V4.2, KCT8103L on V4.3).
+2. Add it to `upstream-lock.json` (newest first) with its full commit hash, and drop the oldest entry to keep three.
+3. Create `<app>/versions/<version>/` with `integration.ini`, `dependencies.json`, and `patches/`, starting from the nearest existing version. Rebase patches until `git apply --check` passes, and pin every dependency the upstream build resolves.
+4. Run `python scripts/firmware/build.py <app> --version <version>`, then package and validate a release. When the new version is the newest, move the `<app>/upstream` submodule to it.
 
 ### Format and lint
 
@@ -131,8 +142,8 @@ scripts/          Python tooling
   firmware/       build.py, prepare.py, integration.cpp, pio_integration.py, oled_brand.py
   release/        package.py, validate_release.py, source_bundle.py, restore_git.py
 src/ include/     Native ESP-IDF selector (src is an IDF component)
-meshcore/         Integration config, patches, pinned upstream submodule
-meshtastic/       Integration config, patches, pinned upstream submodule
+meshcore/         versions/<version>/ integration config and patches; upstream submodule (newest)
+meshtastic/       versions/<version>/ integration config and patches; upstream submodule (newest)
 web/              Browser flasher (Vite/TypeScript)
 tests/            Host + Python tests (selector, screens, flash, layout)
 ```

@@ -63,8 +63,7 @@ jobs:
           gh release view "$TAG" >/dev/null 2>&1 || \
             gh release create "$TAG" --verify-tag --title "Coretastic $TAG" --notes "$NOTES"
           gh release upload "$TAG" --clobber \
-            release/selector.bin release/meshcore.bin release/meshtastic.bin \
-            release/bootloader.bin release/partitions.bin \
+            release/*.bin \
             release/manifest.json release/SHA256SUMS release/corresponding-source.tar.gz \
             release/toolchains.json
 

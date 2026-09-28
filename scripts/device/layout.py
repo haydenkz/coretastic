@@ -3,6 +3,7 @@
 import csv
 import hashlib
 import json
+import re
 import struct
 from pathlib import Path
 
@@ -10,8 +11,19 @@ ROOT = Path(__file__).resolve().parents[2]
 FLASH_SIZE = 0x1000000
 SECTOR = 0x1000
 LAYOUT_ID = "heltec-v4-dual-v1"
+MANIFEST_SCHEMA = 2
 BOARD = "heltec-v4-oled"
 BOARDS = [BOARD]
+APPS = ("meshcore", "meshtastic")
+# Each app's private settings; a downgrade erases them because older firmware
+# may not read what a newer version wrote.
+SETTINGS = {"meshcore": ("mc_nvs", "mc_fs"), "meshtastic": ("mt_nvs", "mt_fs")}
+# The flasher records the installed version in the last sector of each app
+# partition. The bootloader ignores bytes past the image and the apps cannot
+# write there. Coretastic v0.1.0 wrote no record and shipped exactly these.
+RECORD_FORMAT = "coretastic-app-v1"
+LEGACY_VERSIONS = {"meshcore": "companion-v1.17.0", "meshtastic": "v2.7.26.54e0d8d"}
+STORAGE_EPOCH = {"meshcore": 1, "meshtastic": 1, "selector": 1}
 
 
 def partitions(path=ROOT / "partitions.csv"):
@@ -93,40 +105,118 @@ def validate_image(data, app=True):
         raise ValueError("Missing application descriptor")
 
 
+def partition(name):
+    return next(p for p in partitions() if p["name"] == name)
+
+
+def record_offset(component):
+    part = partition(component)
+    return part["offset"] + part["size"] - SECTOR
+
+
+def version_key(version):
+    """Orders upstream tags such as companion-v1.17.1 and v2.7.26.54e0d8d."""
+    match = isinstance(version, str) and re.search(r"(\d+)\.(\d+)\.(\d+)", version)
+    return tuple(int(part) for part in match.groups()) if match else None
+
+
+def app_record(component, version, digest):
+    record = dict(format=RECORD_FORMAT, component=component, version=version, sha256=digest)
+    data = json.dumps(record, separators=(",", ":")).encode() + b"\0"
+    return data.ljust(SECTOR, b"\xff")
+
+
+def installed_version(component, record):
+    """Returns the installed version from its record, or None if it is unreadable."""
+    if record[:1] == b"\xff":
+        return LEGACY_VERSIONS[component]
+    try:
+        meta = json.loads(bytes(record).split(b"\0", 1)[0])
+    except ValueError:
+        return None
+    if (
+        not isinstance(meta, dict)
+        or meta.get("format") != RECORD_FORMAT
+        or meta.get("component") != component
+        or version_key(meta.get("version")) is None
+    ):
+        return None
+    return meta["version"]
+
+
+def settings_erase_required(installed, target):
+    """Moving to an older (or unidentifiable) version must erase that app's settings."""
+    installed_key, target_key = version_key(installed), version_key(target)
+    return installed_key is None or target_key is None or target_key < installed_key
+
+
+def check_image(label, image, filename, offset, limit, directory, kind):
+    if image.get("file") != filename or image.get("offset") != offset:
+        raise ValueError(f"{label}: wrong filename or offset")
+    size = image.get("size")
+    if type(size) is not int or not 0 < size <= limit or (size + 4095) // 4096 * 4096 > limit:
+        raise ValueError(f"{label}: image exceeds its write boundary")
+    digest = image.get("sha256", "")
+    if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+        raise ValueError(f"{label}: invalid checksum")
+    if kind == "partitions" and (size != SECTOR or digest != sha(partition_binary())):
+        raise ValueError("Partition binary differs from layout")
+    if directory:
+        data = (Path(directory) / filename).read_bytes()
+        if len(data) != size or sha(data) != digest:
+            raise ValueError(f"{label}: size/checksum mismatch")
+        if kind != "partitions":
+            validate_image(data, kind == "app")
+
+
 def validate_manifest(manifest, directory=None):
-    if manifest.get("schema") != 1 or manifest.get("layout") != LAYOUT_ID:
+    if manifest.get("schema") != MANIFEST_SCHEMA or manifest.get("layout") != LAYOUT_ID:
         raise ValueError("Unsupported manifest schema or layout")
     if manifest.get("chip") != "ESP32-S3" or manifest.get("flash_size") != FLASH_SIZE:
         raise ValueError("Unsupported hardware")
     if manifest.get("boards") != BOARDS or manifest.get("partitions") != partitions():
         raise ValueError("Partition/hardware contract differs from this flasher")
-    if manifest.get("storage_epoch") != {"meshcore": 1, "meshtastic": 1, "selector": 1}:
+    if manifest.get("storage_epoch") != STORAGE_EPOCH:
         raise ValueError("Incompatible storage format")
     if not isinstance(manifest.get("version"), str) or not manifest["version"]:
         raise ValueError("Missing release version")
     images = manifest.get("images", {})
-    expected = {p["name"]: (p["offset"], p["size"]) for p in partitions() if p["type"] == "app"}
-    expected.update(bootloader=(0, 0x8000), partitions=(0x8000, SECTOR))
+    selector = partition("selector")
+    expected = {
+        "selector": (selector["offset"], selector["size"], "app"),
+        "bootloader": (0, 0x8000, "bootloader"),
+        "partitions": (0x8000, SECTOR, "partitions"),
+    }
     if images.keys() != expected.keys():
         raise ValueError("Missing or unexpected image")
-    for name, (offset, limit) in expected.items():
-        image = images[name]
-        if image.get("file") != f"{name}.bin" or image.get("offset") != offset:
-            raise ValueError(f"{name}: wrong filename or offset")
-        size = image.get("size")
-        if type(size) is not int or not 0 < size <= limit or (size + 4095) // 4096 * 4096 > limit:
-            raise ValueError(f"{name}: image exceeds its write boundary")
-        digest = image.get("sha256", "")
-        if len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
-            raise ValueError(f"{name}: invalid checksum")
-        if name == "partitions" and (size != SECTOR or digest != sha(partition_binary())):
-            raise ValueError("Partition binary differs from layout")
-        if directory:
-            data = (Path(directory) / image["file"]).read_bytes()
-            if len(data) != size or sha(data) != digest:
-                raise ValueError(f"{name}: size/checksum mismatch")
-            if name != "partitions":
-                validate_image(data, name != "bootloader")
+    for name, (offset, limit, kind) in expected.items():
+        check_image(name, images[name], f"{name}.bin", offset, limit, directory, kind)
+    apps = manifest.get("apps")
+    if not isinstance(apps, dict) or apps.keys() != set(APPS):
+        raise ValueError("Missing or unexpected app")
+    for component in APPS:
+        entries = apps[component]
+        if not isinstance(entries, list) or not entries:
+            raise ValueError(f"{component}: no versions")
+        part = partition(component)
+        keys = []
+        for entry in entries:
+            version = entry.get("version") if isinstance(entry, dict) else None
+            if not isinstance(version, str) or not re.fullmatch(r"[A-Za-z0-9._-]+", version):
+                raise ValueError(f"{component}: invalid version")
+            keys.append(version_key(version))
+            if keys[-1] is None:
+                raise ValueError(f"{component}: unorderable version {version}")
+            commit = entry.get("commit")
+            if not isinstance(commit, str) or not re.fullmatch(r"[0-9a-f]{40}", commit):
+                raise ValueError(f"{component} {version}: invalid commit")
+            # The last sector of the partition holds the version record.
+            limit = part["size"] - SECTOR
+            label = f"{component} {version}"
+            filename = f"{component}-{version}.bin"
+            check_image(label, entry, filename, part["offset"], limit, directory, "app")
+        if any(newer <= older for newer, older in zip(keys, keys[1:])):
+            raise ValueError(f"{component}: versions must be unique and newest first")
     return manifest
 
 

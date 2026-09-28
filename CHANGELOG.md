@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Choose the MeshCore and Meshtastic version when installing or updating, in the web flasher and the CLI (`--meshcore-version`, `--meshtastic-version`). Releases offer MeshCore `companion-v1.17.1`, `companion-v1.17.0`, and `companion-v1.16.0`, and Meshtastic `v2.7.26.54e0d8d` (the only stable release that supports the V4.3 LoRa front end).
+- The flasher records each app's installed version and requires erasing that app's settings before installing an older version.
+- Release manifest schema 2 lists every app version; the corresponding-source archive bundles each version's sources.
+
 ## v0.1.0 - 2026-09-14
 
 - Dual-boot selector for MeshCore `companion-v1.17.0` and Meshtastic `v2.7.26.54e0d8d` on one Heltec V4 OLED board.
