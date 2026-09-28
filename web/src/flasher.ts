@@ -1,10 +1,11 @@
 import { ESPLoader, Transport } from "esptool-js";
 import {
   APPS,
-  FLASH_SIZE,
   SECTOR,
   SETTINGS,
   appRecord,
+  board,
+  boardRelease,
   hash,
   installedVersion,
   md5hex,
@@ -15,37 +16,37 @@ import {
   requireCondition,
   selectApp,
   settingsEraseRequired,
+  usbFilters,
   validateAsset,
   validateManifest,
 } from "./contract";
 import type { App, Manifest, Operation, Versions } from "./contract";
-// Native USB Serial/JTAG interface on supported Heltec V4 boards.
-const HELTEC_V4_USB_FILTER: SerialPortFilter = {
-  usbVendorId: 0x303a,
-  usbProductId: 0x1001,
-};
 
-function isEspressifUsb(port: SerialPort): boolean {
-  const info = port.getInfo();
-  return (
-    info.usbVendorId === HELTEC_V4_USB_FILTER.usbVendorId &&
-    info.usbProductId === HELTEC_V4_USB_FILTER.usbProductId
-  );
-}
-
-export async function selectEspressifPort(
+// Only offer the USB interfaces the chosen board exposes (native USB on the V4,
+// a CP2102 bridge on the V3).
+export async function selectBoardPort(
+  id: string,
   serial: Pick<Serial, "getPorts" | "requestPort"> = navigator.serial,
 ): Promise<SerialPort> {
-  const granted = (await serial.getPorts()).filter(isEspressifUsb);
+  const filters = usbFilters(id);
+  const matches = (port: SerialPort) => {
+    const info = port.getInfo();
+    return filters.some(
+      (f) =>
+        info.usbVendorId === f.usbVendorId &&
+        info.usbProductId === f.usbProductId,
+    );
+  };
+  const granted = (await serial.getPorts()).filter(matches);
   if (granted.length === 1) return granted[0];
-  return serial.requestPort({ filters: [HELTEC_V4_USB_FILTER] });
+  return serial.requestPort({ filters });
 }
 
 function serialConnectionError(error: unknown): Error {
   if (!(error instanceof DOMException))
     return error instanceof Error ? error : new Error(String(error));
   if (error.name === "NotFoundError")
-    return new Error("No Espressif USB serial device was selected.", {
+    return new Error("No matching USB serial device was selected.", {
       cause: error,
     });
   if (error.name === "NetworkError" || error.name === "InvalidStateError")
@@ -66,41 +67,44 @@ export interface Device {
 }
 // What a connected device has installed; versions are only meaningful when
 // the partition table is the dual-boot layout.
-export async function inspect(device: Pick<Device, "read">) {
+export async function inspect(device: Pick<Device, "read">, id: string) {
   const layout =
-    hash(await device.read(0x8000, SECTOR)) === hash(partitionBinary());
+    hash(await device.read(0x8000, SECTOR)) === hash(partitionBinary(id));
   const installed: Partial<Record<App, string | null>> = {};
   if (layout)
     for (const app of APPS)
       installed[app] = installedVersion(
+        id,
         app,
-        await device.read(recordOffset(app), SECTOR),
+        await device.read(recordOffset(id, app), SECTOR),
       );
   return { layout, installed };
 }
 export async function program(
   device: Device,
   manifest: Manifest,
+  id: string,
   op: Operation,
   assets: Map<string, Uint8Array>,
   versions: Versions = {},
   eraseSettings = false,
 ) {
   validateManifest(manifest);
-  const planned = plannedImages(manifest, op, versions);
+  const release = boardRelease(manifest, id);
+  const planned = plannedImages(release, op, versions);
   // Validate every byte before the first erase/write, including installed layout.
   for (const { image, kind } of planned) {
     const bytes = assets.get(image.file);
     requireCondition(bytes, `${image.file}: asset missing.`);
-    validateAsset(image, kind, bytes);
+    validateAsset(image, kind, bytes, board(id).flash_size);
   }
   if (op !== "install") {
     requireCondition(
-      hash(await device.read(0x8000, 4096)) === hash(partitionBinary()),
+      hash(await device.read(0x8000, 4096)) === hash(partitionBinary(id)),
       "Installed partition table is incompatible. Back up first, then use complete installation.",
     );
     if (op !== "recovery") {
-      const boot = manifest.images.bootloader;
+      const boot = release.images.bootloader;
       requireCondition(
         hash(await device.read(0, boot.size)) === boot.sha256,
         "Installed bootloader differs. Run selector/bootloader recovery first.",
@@ -113,15 +117,16 @@ export async function program(
   }));
   for (const app of APPS) {
     if (op !== "install" && op !== app) continue;
-    const target = selectApp(manifest, app, versions[app]);
+    const target = selectApp(release, app, versions[app]);
     files.push({
-      address: recordOffset(app),
+      address: recordOffset(id, app),
       data: appRecord(app, target.version, target.sha256),
     });
     if (op === "install") continue; // The whole chip is erased.
     const installed = installedVersion(
+      id,
       app,
-      await device.read(recordOffset(app), SECTOR),
+      await device.read(recordOffset(id, app), SECTOR),
     );
     requireCondition(
       eraseSettings || !settingsEraseRequired(installed, target.version),
@@ -129,7 +134,7 @@ export async function program(
     );
     if (eraseSettings)
       for (const name of SETTINGS[app]) {
-        const { offset, size } = partition(name);
+        const { offset, size } = partition(id, name);
         files.push({ address: offset, data: new Uint8Array(size).fill(255) });
       }
   }
@@ -146,6 +151,7 @@ export class UsbDevice implements Device {
   constructor(
     readonly loader: ESPLoader,
     readonly transport: Transport,
+    readonly board: string,
     readonly progress: (percent: number) => void,
     private readonly disconnected: () => void,
   ) {}
@@ -163,13 +169,16 @@ export class UsbDevice implements Device {
   }
 
   static async connect(
+    boardId: string,
     log: (message: string) => void,
     progress: (percent: number) => void,
     disconnected: () => void = () => {},
   ): Promise<UsbDevice> {
+    const profile = board(boardId);
+    const mib = profile.flash_size >> 20;
     let port: SerialPort;
     try {
-      port = await selectEspressifPort();
+      port = await selectBoardPort(boardId);
     } catch (error) {
       throw serialConnectionError(error);
     }
@@ -183,7 +192,13 @@ export class UsbDevice implements Device {
       baudrate: 460800,
       terminal: { clean() {}, write: log, writeLine: log },
     });
-    const device = new UsbDevice(loader, transport, progress, disconnected);
+    const device = new UsbDevice(
+      loader,
+      transport,
+      boardId,
+      progress,
+      disconnected,
+    );
     navigator.serial.addEventListener("disconnect", device.serialDisconnect);
     transport.setDeviceLostCallback(() => device.reportDisconnect());
     try {
@@ -192,10 +207,11 @@ export class UsbDevice implements Device {
         loader.chip?.CHIP_NAME === "ESP32-S3",
         "Only ESP32-S3 is supported.",
       );
+      // The JEDEC capacity byte is log2 of the size in bytes.
       const id = await loader.readFlashId();
       requireCondition(
-        ((id >>> 16) & 255) === 24,
-        "Expected 16 MiB flash. Do not flash this board.",
+        ((id >>> 16) & 255) === Math.log2(profile.flash_size),
+        `Expected ${mib} MiB flash for ${profile.name}. Check the board you selected.`,
       );
       // ESP32-S3 eFuse definitions from Espressif esptool 4.8.1.
       const crypt = ((await loader.readReg(0x60007034)) >>> 18) & 7;
@@ -208,7 +224,7 @@ export class UsbDevice implements Device {
       );
       device.mac = await loader.chip.readMac(loader);
       log(
-        `Validated ESP32-S3, 16 MiB flash, MAC ${device.mac}. Board revision requires your physical check.`,
+        `Validated ESP32-S3, ${mib} MiB flash, MAC ${device.mac}. ${profile.name} requires your physical check.`,
       );
       return device;
     } catch (error) {
@@ -253,7 +269,10 @@ export class UsbDevice implements Device {
       );
   }
   async restore(bytes: Uint8Array) {
-    requireCondition(bytes.length === FLASH_SIZE, "Invalid backup length.");
+    requireCondition(
+      bytes.length === board(this.board).flash_size,
+      "Invalid backup length.",
+    );
     await this.write([{ address: 0, data: bytes }], true);
   }
   async disconnect() {

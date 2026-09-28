@@ -1,4 +1,5 @@
 #include "oled.h"
+#include "board_profile.h"
 #include "driver/gpio.h"
 #include "driver/i2c.h"
 #include "freertos/FreeRTOS.h"
@@ -27,18 +28,18 @@ esp_err_t show() {
 } // namespace
 
 esp_err_t oled_init() {
-  // V4.2/V4.3 Vext uses an inverting MOSFET before the OLED supply LDO.
-  gpio_set_direction(GPIO_NUM_36, GPIO_MODE_OUTPUT);
-  gpio_set_level(GPIO_NUM_36, 0);
-  gpio_set_direction(GPIO_NUM_21, GPIO_MODE_OUTPUT);
-  gpio_set_level(GPIO_NUM_21, 0);
+  using namespace coretastic;
+  gpio_set_direction(kVext, GPIO_MODE_OUTPUT);
+  gpio_set_level(kVext, kVextOn);
+  gpio_set_direction(kOledReset, GPIO_MODE_OUTPUT);
+  gpio_set_level(kOledReset, 0);
   vTaskDelay(pdMS_TO_TICKS(20));
-  gpio_set_level(GPIO_NUM_21, 1);
+  gpio_set_level(kOledReset, 1);
   vTaskDelay(pdMS_TO_TICKS(20));
   i2c_config_t config{};
   config.mode = I2C_MODE_MASTER;
-  config.sda_io_num = GPIO_NUM_17;
-  config.scl_io_num = GPIO_NUM_18;
+  config.sda_io_num = kOledSda;
+  config.scl_io_num = kOledScl;
   config.sda_pullup_en = GPIO_PULLUP_ENABLE;
   config.scl_pullup_en = GPIO_PULLUP_ENABLE;
   config.master.clk_speed = 100000;

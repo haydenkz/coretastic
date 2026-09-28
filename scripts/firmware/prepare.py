@@ -2,13 +2,16 @@
 """Create disposable, pinned build checkouts; never patch the source submodules."""
 
 import argparse
-import json
 import hashlib
-import shutil
+import json
 import subprocess
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "scripts/device"))
+
+from layout import boards, layout_header, partition  # noqa: E402
 
 
 def run(*args, cwd=ROOT):
@@ -34,20 +37,61 @@ def build_dir(component, version):
     return ROOT / ".build" / component / version
 
 
+def environment(component, board_id):
+    return f"{lock()[component]['environment']}-{board_id}"
+
+
+def board_environment(component, board_id):
+    """One PlatformIO environment per board, extending its upstream environment."""
+    upstream = boards()[board_id]["environments"][component]
+    return f"""
+[env:{environment(component, board_id)}]
+extends = env:{upstream}
+custom_coretastic_board = {board_id}
+board_build.partitions = coretastic/boards/{board_id}/partitions.csv
+board_build.app_partition_name = {component}
+board_upload.offset_address = {partition(board_id, component)["offset"]:#x}
+extra_scripts = ${{coretastic.extra_scripts}}
+build_flags =
+    ${{env:{upstream}.build_flags}}
+    ${{coretastic.build_flags}}
+lib_deps = ${{coretastic.lib_deps}}
+platform_packages = ${{coretastic.platform_packages}}
+"""
+
+
+def generated_files(component, version):
+    """Everything prepare writes into a checkout besides patches, by relative path."""
+    firmware = ROOT / "scripts/firmware"
+    files = {
+        "coretastic/integration.cpp": (firmware / "integration.cpp").read_bytes(),
+        "coretastic/storage_boundary.h": (ROOT / "include/storage_boundary.h").read_bytes(),
+        "coretastic/build.py": (firmware / "pio_integration.py").read_bytes(),
+    }
+    config = (config_dir(component, version) / "integration.ini").read_text()
+    for board_id in boards():
+        board_files = ROOT / "boards" / board_id
+        files[f"coretastic/boards/{board_id}/partitions.csv"] = (
+            board_files / "partitions.csv"
+        ).read_bytes()
+        files[f"coretastic/boards/{board_id}/coretastic_layout.h"] = layout_header(
+            board_id
+        ).encode()
+        config += board_environment(component, board_id)
+    return files, config
+
+
 def input_digest(component, version):
-    config = config_dir(component, version)
-    files = [
-        ROOT / "partitions.csv",
-        ROOT / "scripts/firmware/integration.cpp",
-        ROOT / "scripts/firmware/pio_integration.py",
-        ROOT / "include/storage_boundary.h",
-        config / "integration.ini",
-    ]
-    files.extend(sorted((config / "patches").glob("*.patch")))
+    files, config = generated_files(component, version)
     digest = hashlib.sha256(json.dumps(locked_version(component, version)).encode())
-    for path in files:
-        digest.update(str(path.relative_to(ROOT)).encode())
-        digest.update(path.read_bytes())
+    patches = sorted((config_dir(component, version) / "patches").glob("*.patch"))
+    for name, data in [
+        *sorted(files.items()),
+        ("platformio.ini", config.encode()),
+        *((str(path.relative_to(ROOT)), path.read_bytes()) for path in patches),
+    ]:
+        digest.update(name.encode())
+        digest.update(data)
     return digest.hexdigest()
 
 
@@ -83,14 +127,12 @@ def prepare(component, version):
     for patch in sorted((config / "patches").glob("*.patch")):
         run("git", "apply", "--check", str(patch), cwd=dest)
         run("git", "apply", str(patch), cwd=dest)
-    integration = dest / "coretastic"
-    integration.mkdir()
-    for source in [ROOT / "scripts/firmware/integration.cpp", ROOT / "include/storage_boundary.h"]:
-        shutil.copy2(source, integration / source.name)
-    shutil.copy2(ROOT / "scripts/firmware/pio_integration.py", integration / "build.py")
-    shutil.copy2(ROOT / "partitions.csv", integration / "partitions.csv")
-    with (dest / "platformio.ini").open("a") as platformio:
-        platformio.write((config / "integration.ini").read_text())
+    files, platformio = generated_files(component, version)
+    for name, data in files.items():
+        (dest / name).parent.mkdir(parents=True, exist_ok=True)
+        (dest / name).write_bytes(data)
+    with (dest / "platformio.ini").open("a") as ini:
+        ini.write(platformio)
     (dest / ".coretastic-inputs").write_text(input_digest(component, version))
     print(dest)
 

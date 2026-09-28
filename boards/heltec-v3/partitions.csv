@@ -1,0 +1,10 @@
+# Name, Type, SubType, Offset, Size, Flags
+selector_nvs,data,nvs,0x9000,0x5000,
+otadata,data,ota,0xe000,0x2000,
+selector,app,factory,0x10000,0x50000,
+meshcore,app,ota_0,0x60000,0x200000,
+meshtastic,app,ota_1,0x260000,0x300000,
+mc_nvs,data,nvs,0x560000,0x10000,
+mt_nvs,data,nvs,0x570000,0x10000,
+mc_fs,data,spiffs,0x580000,0x80000,
+mt_fs,data,spiffs,0x600000,0x200000,

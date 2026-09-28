@@ -14,8 +14,8 @@ from pathlib import Path
 _scripts = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(_scripts / "device"), str(_scripts / "firmware")]
 
-from layout import APPS, ROOT, sha
-from prepare import build_dir, lock
+from layout import APPS, ROOT, boards, sha
+from prepare import build_dir, environment, lock
 
 EXCLUDED = {
     ".git",
@@ -99,13 +99,15 @@ def main():
             index_file.write_text(json.dumps(index, indent=2) + "\n")
             tar.add(index_file, arcname="bundles/index.json")
         for component in APPS:
-            environment = locked[component]["environment"]
             for record in locked[component]["versions"]:
                 version = record["version"]
-                deps = build_dir(component, version) / ".pio/libdeps" / environment
-                if not deps.is_dir():
-                    raise ValueError(f"Missing built dependency sources: {deps}")
-                tar.add(deps, arcname=f"dependencies/{component}-{version}", filter=source_filter)
+                for board_id in boards():
+                    env = environment(component, board_id)
+                    deps = build_dir(component, version) / ".pio/libdeps" / env
+                    if not deps.is_dir():
+                        raise ValueError(f"Missing built dependency sources: {deps}")
+                    arcname = f"dependencies/{component}-{version}/{board_id}"
+                    tar.add(deps, arcname=arcname, filter=source_filter)
         web_packages = subprocess.check_output(
             ["npm", "ls", "--omit=dev", "--parseable", "--all"], cwd=ROOT / "web", text=True
         ).splitlines()

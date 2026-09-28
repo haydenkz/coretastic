@@ -61,5 +61,5 @@ jobs:
           key: platformio-${{ runner.os }}-${{ hashFiles('platformio.ini', 'requirements.txt') }}
           restore-keys: |
             platformio-${{ runner.os }}-
-      - name: Compile selector firmware
-        run: pio run -e selector
+      - name: Compile selector firmware for every board
+        run: pio run

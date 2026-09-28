@@ -6,7 +6,7 @@ import os
 import subprocess
 import shutil
 
-from prepare import ROOT, build_dir, input_digest, lock, prepare
+from prepare import ROOT, boards, build_dir, environment, input_digest, lock, prepare
 
 
 def remove_generated(directory, component):
@@ -26,6 +26,12 @@ def main():
     parser.add_argument(
         "--version", help="Build one locked app version instead of every locked version"
     )
+    parser.add_argument(
+        "--board",
+        action="append",
+        choices=list(boards()),
+        help="Build only this board (repeatable); default: every board",
+    )
     args = parser.parse_args()
     components = (
         ["selector", "meshcore", "meshtastic"] if args.component == "all" else [args.component]
@@ -33,9 +39,10 @@ def main():
     if args.version and args.component in ("all", "selector"):
         parser.error("--version needs meshcore or meshtastic")
     locked = lock()
+    board_ids = args.board or list(boards())
     for component in components:
         if component == "selector":
-            targets = [(ROOT, "selector")]
+            targets = [(ROOT, [f"selector-{board_id}" for board_id in board_ids])]
         else:
             # Checkouts made before per-version builds sit directly in .build/<component>.
             legacy = ROOT / ".build" / component
@@ -58,9 +65,13 @@ def main():
                     remove_generated(directory, component)
                 if not directory.exists():
                     prepare(component, version)
-                targets.append((directory, locked[component]["environment"]))
-        for directory, environment in targets:
-            command = [os.environ.get("PIO", "pio"), "run", "-d", str(directory), "-e", environment]
+                targets.append(
+                    (directory, [environment(component, board_id) for board_id in board_ids])
+                )
+        for directory, environments in targets:
+            command = [os.environ.get("PIO", "pio"), "run", "-d", str(directory)]
+            for name in environments:
+                command += ["-e", name]
             subprocess.run(command, cwd=ROOT, check=True)
 
 

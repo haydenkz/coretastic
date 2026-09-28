@@ -1,25 +1,9 @@
-import csv from "../../partitions.csv?raw";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { md5 } from "@noble/hashes/legacy.js";
 import { bytesToHex } from "@noble/hashes/utils.js";
 
-export const FLASH_SIZE = 0x1000000;
 export const SECTOR = 4096;
-export const LAYOUT = "heltec-v4-dual-v1";
-export const MANIFEST_SCHEMA = 2;
-export const BOARD = "heltec-v4-oled";
-export const BOARDS = [BOARD];
-export const partitions = csv
-  .split("\n")
-  .filter((x) => x && !x.startsWith("#"))
-  .map((line) => {
-    const [name, type, subtype, offset, size] = line
-      .split(",")
-      .map((x) => x.trim());
-    return { name, type, subtype, offset: Number(offset), size: Number(size) };
-  });
-export const hash = (bytes: Uint8Array) => bytesToHex(sha256(bytes));
-export const md5hex = (bytes: Uint8Array) => bytesToHex(md5(bytes));
+export const MANIFEST_SCHEMA = 3;
 export const APPS = ["meshcore", "meshtastic"] as const;
 export type App = (typeof APPS)[number];
 export type Component = "selector" | App;
@@ -33,12 +17,30 @@ export const SETTINGS: Record<App, string[]> = {
   meshtastic: ["mt_nvs", "mt_fs"],
 };
 // The flasher records the installed version in the last sector of each app
-// partition. Coretastic v0.1.0 wrote no record and shipped exactly these.
+// partition. A board's legacy_versions name what a flash without a record runs
+// (Coretastic v0.1.0 wrote none and supported only the Heltec V4).
 export const RECORD_FORMAT = "coretastic-app-v1";
-export const LEGACY_VERSIONS: Record<App, string> = {
-  meshcore: "companion-v1.17.0",
-  meshtastic: "v2.7.26.54e0d8d",
-};
+export const hash = (bytes: Uint8Array) => bytesToHex(sha256(bytes));
+export const md5hex = (bytes: Uint8Array) => bytesToHex(md5(bytes));
+
+export interface BoardProfile {
+  id: string;
+  name: string;
+  experimental: boolean;
+  layout: string;
+  flash_size: number;
+  usb: string[];
+  backup_aliases: string[];
+  legacy_versions: Partial<Record<App, string>>;
+  environments: Record<App, string>;
+}
+export interface Partition {
+  name: string;
+  type: string;
+  subtype: string;
+  offset: number;
+  size: number;
+}
 export interface Image {
   file: string;
   offset: number;
@@ -49,30 +51,95 @@ export interface AppImage extends Image {
   version: string;
   commit: string;
 }
-export interface Manifest {
-  schema: number;
+export interface BoardRelease {
+  name: string;
+  experimental: boolean;
   layout: string;
-  version: string;
-  chip: string;
   flash_size: number;
-  boards: string[];
-  partitions: typeof partitions;
-  storage_epoch: Record<Component, number>;
+  partitions: Partition[];
   images: Record<SharedImage, Image>;
   apps: Record<App, AppImage[]>;
 }
-const COMPATIBLE_BACKUP_BOARDS: Record<string, true> = {
-  [BOARD]: true,
-  "heltec-v4.2-oled": true,
-  "heltec-v4.3-oled": true,
-};
+export interface Manifest {
+  schema: number;
+  version: string;
+  chip: string;
+  storage_epoch: Record<Component, number>;
+  boards: Record<string, BoardRelease>;
+}
+
 export function requireCondition(
   condition: unknown,
   message: string,
 ): asserts condition {
   if (!condition) throw new Error(message);
 }
-export function partitionBinary(): Uint8Array {
+
+// Board profiles and partition tables are the same files the Python tooling reads.
+const profileFiles = import.meta.glob<Omit<BoardProfile, "id">>(
+  "../../boards/*/board.json",
+  { eager: true, import: "default" },
+);
+const tableFiles = import.meta.glob<string>("../../boards/*/partitions.csv", {
+  eager: true,
+  query: "?raw",
+  import: "default",
+});
+const boardDirectory = (path: string) => path.split("/").at(-2)!;
+// Supported boards first; experimental ones last.
+export const BOARDS: Record<string, BoardProfile> = Object.fromEntries(
+  Object.entries(profileFiles)
+    .map(([path, profile]) => [
+      boardDirectory(path),
+      { ...profile, id: boardDirectory(path) },
+    ])
+    .sort(
+      ([a, pa], [b, pb]) =>
+        Number((pa as BoardProfile).experimental) -
+          Number((pb as BoardProfile).experimental) ||
+        (a as string).localeCompare(b as string),
+    ),
+);
+const TABLES: Record<string, Partition[]> = Object.fromEntries(
+  Object.entries(tableFiles).map(([path, csv]) => [
+    boardDirectory(path),
+    csv
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line && !line.startsWith("#"))
+      .map((line) => {
+        const [name, type, subtype, offset, size] = line
+          .split(",")
+          .map((x) => x.trim());
+        return {
+          name,
+          type,
+          subtype,
+          offset: Number(offset),
+          size: Number(size),
+        };
+      }),
+  ]),
+);
+export function board(id: string): BoardProfile {
+  const profile = BOARDS[id];
+  requireCondition(profile, `Unknown board ${id}.`);
+  return profile;
+}
+export function partitions(id: string): Partition[] {
+  const table = TABLES[board(id).id];
+  requireCondition(table, `${id}: missing partition table.`);
+  return table;
+}
+// Web Serial filters, from board.json "vendor:product" hex pairs.
+export function usbFilters(id: string): SerialPortFilter[] {
+  return board(id).usb.map((pair) => {
+    const [vendor, product] = pair.split(":").map((x) => parseInt(x, 16));
+    return { usbVendorId: vendor, usbProductId: product };
+  });
+}
+export function partitionBinary(id: string): Uint8Array {
+  const table = partitions(id);
   const data = new Uint8Array(4096).fill(255);
   const view = new DataView(data.buffer);
   const subtypes: Record<string, number> = {
@@ -83,7 +150,7 @@ export function partitionBinary(): Uint8Array {
     ota: 0,
     spiffs: 130,
   };
-  partitions.forEach((p, i) => {
+  table.forEach((p, i) => {
     const pos = i * 32;
     data.fill(0, pos, pos + 32);
     view.setUint16(pos, 0x50aa, true);
@@ -93,18 +160,20 @@ export function partitionBinary(): Uint8Array {
     view.setUint32(pos + 8, p.size, true);
     data.set(new TextEncoder().encode(p.name), pos + 12);
   });
-  const pos = partitions.length * 32;
+  const pos = table.length * 32;
   data[pos] = data[pos + 1] = 0xeb;
   data.set(md5(data.slice(0, pos)), pos + 16);
   return data;
 }
-export function partition(name: string) {
-  const found = partitions.find((p) => p.name === name);
-  requireCondition(found, `Unknown partition ${name}.`);
+export function partition(id: string, name: string): Partition {
+  const found = partitions(id).find((p) => p.name === name);
+  requireCondition(found, `${id}: unknown partition ${name}.`);
   return found;
 }
-export const recordOffset = (app: App) =>
-  partition(app).offset + partition(app).size - SECTOR;
+export const recordOffset = (id: string, app: App) =>
+  partition(id, app).offset + partition(id, app).size - SECTOR;
+// The image header's flash size field: 2 = 4 MiB, 3 = 8 MiB, 4 = 16 MiB.
+export const flashSizeCode = (size: number) => Math.log2(size >> 20);
 // Orders upstream tags such as companion-v1.17.1 and v2.7.26.54e0d8d.
 export function versionKey(version: unknown): number[] | null {
   const match =
@@ -129,8 +198,12 @@ export function appRecord(app: App, version: string, sha256: string) {
   return data;
 }
 // The installed version from its record, or null if it cannot be identified.
-export function installedVersion(app: App, record: Uint8Array): string | null {
-  if (record[0] === 255) return LEGACY_VERSIONS[app];
+export function installedVersion(
+  id: string,
+  app: App,
+  record: Uint8Array,
+): string | null {
+  if (record[0] === 255) return board(id).legacy_versions[app] ?? null;
   const end = record.indexOf(0);
   let meta: unknown;
   try {
@@ -158,14 +231,20 @@ export function settingsEraseRequired(
     to = versionKey(target);
   return !from || !to || compareKeys(to, from) < 0;
 }
-export function selectApp(m: Manifest, app: App, version?: string) {
-  const entries = m.apps[app];
+export function boardRelease(m: Manifest, id: string): BoardRelease {
+  const release = m.boards[id];
+  requireCondition(release, `This release has no images for ${id}.`);
+  return release;
+}
+export function selectApp(release: BoardRelease, app: App, version?: string) {
+  const entries = release.apps[app];
   const entry = version
     ? entries.find((e) => e.version === version)
     : entries[0];
   requireCondition(entry, `${app} ${version} is not in this release.`);
   return entry;
 }
+export const boardFile = (id: string, name: string) => `${id}-${name}.bin`;
 function checkImage(
   label: string,
   image: Image | undefined,
@@ -188,6 +267,84 @@ function checkImage(
     `${label}: invalid checksum.`,
   );
 }
+function validateBoard(id: string, release: BoardRelease) {
+  const profile = board(id);
+  requireCondition(
+    release &&
+      release.layout === profile.layout &&
+      release.flash_size === profile.flash_size,
+    `${id}: layout or flash size differs from this flasher.`,
+  );
+  requireCondition(
+    JSON.stringify(release.partitions) === JSON.stringify(partitions(id)),
+    `${id}: partition map does not match this flasher.`,
+  );
+  const selector = partition(id, "selector");
+  const shared: Record<SharedImage, [number, number]> = {
+    selector: [selector.offset, selector.size],
+    bootloader: [0, 0x8000],
+    partitions: [0x8000, SECTOR],
+  };
+  requireCondition(
+    release.images &&
+      Object.keys(release.images).sort().join() ===
+        Object.keys(shared).sort().join(),
+    `${id}: missing or unexpected images.`,
+  );
+  for (const [name, [offset, limit]] of Object.entries(shared))
+    checkImage(
+      `${id} ${name}`,
+      release.images[name as SharedImage],
+      boardFile(id, name),
+      offset,
+      limit,
+    );
+  requireCondition(
+    release.images.partitions.size === SECTOR &&
+      release.images.partitions.sha256 === hash(partitionBinary(id)),
+    `${id}: partition checksum does not match layout.`,
+  );
+  requireCondition(
+    release.apps &&
+      Object.keys(release.apps).sort().join() === [...APPS].sort().join(),
+    `${id}: missing or unexpected apps.`,
+  );
+  for (const app of APPS) {
+    const entries = release.apps[app];
+    requireCondition(
+      Array.isArray(entries) && entries.length > 0,
+      `${id} ${app}: no versions in this release.`,
+    );
+    const keys: number[][] = [];
+    for (const entry of entries) {
+      const version = entry?.version;
+      requireCondition(
+        typeof version === "string" && /^[A-Za-z0-9._-]+$/.test(version),
+        `${id} ${app}: invalid version.`,
+      );
+      const key = versionKey(version);
+      requireCondition(key, `${id} ${app}: unorderable version ${version}.`);
+      keys.push(key);
+      requireCondition(
+        typeof entry.commit === "string" && /^[0-9a-f]{40}$/.test(entry.commit),
+        `${id} ${app} ${version}: invalid commit.`,
+      );
+      // The last sector of the partition holds the version record.
+      checkImage(
+        `${id} ${app} ${version}`,
+        entry,
+        boardFile(id, `${app}-${version}`),
+        partition(id, app).offset,
+        partition(id, app).size - SECTOR,
+      );
+    }
+    for (let i = 1; i < keys.length; i++)
+      requireCondition(
+        compareKeys(keys[i - 1], keys[i]) > 0,
+        `${id} ${app}: versions must be unique and newest first.`,
+      );
+  }
+}
 export function validateManifest(input: unknown): Manifest {
   requireCondition(
     input && typeof input === "object",
@@ -195,21 +352,10 @@ export function validateManifest(input: unknown): Manifest {
   );
   const m = input as Manifest;
   requireCondition(
-    m.schema === MANIFEST_SCHEMA && m.layout === LAYOUT,
-    "Unsupported release layout. Use its matching flasher.",
+    m.schema === MANIFEST_SCHEMA,
+    "Unsupported release format. Use the flasher from the same release.",
   );
-  requireCondition(
-    m.chip === "ESP32-S3" && m.flash_size === FLASH_SIZE,
-    "Unsupported target.",
-  );
-  requireCondition(
-    JSON.stringify(m.boards) === JSON.stringify(BOARDS),
-    "Unsupported board list.",
-  );
-  requireCondition(
-    JSON.stringify(m.partitions) === JSON.stringify(partitions),
-    "Partition map does not match this flasher.",
-  );
+  requireCondition(m.chip === "ESP32-S3", "Unsupported target.");
   requireCondition(
     typeof m.version === "string" && m.version.length > 0,
     "Missing release version.",
@@ -219,79 +365,33 @@ export function validateManifest(input: unknown): Manifest {
       m.storage_epoch?.[name] === 1,
       `Incompatible ${name} settings format.`,
     );
-  const shared: Record<SharedImage, [number, number]> = {
-    selector: [partition("selector").offset, partition("selector").size],
-    bootloader: [0, 0x8000],
-    partitions: [0x8000, SECTOR],
-  };
   requireCondition(
-    m.images &&
-      Object.keys(m.images).sort().join() === Object.keys(shared).sort().join(),
-    "Missing or unexpected images.",
+    m.boards &&
+      typeof m.boards === "object" &&
+      Object.keys(m.boards).length > 0,
+    "Release lists no boards.",
   );
-  for (const [name, [offset, limit]] of Object.entries(shared))
-    checkImage(
-      name,
-      m.images[name as SharedImage],
-      `${name}.bin`,
-      offset,
-      limit,
-    );
-  requireCondition(
-    m.images.partitions.size === SECTOR &&
-      m.images.partitions.sha256 === hash(partitionBinary()),
-    "Partition checksum does not match layout.",
-  );
-  requireCondition(
-    m.apps && Object.keys(m.apps).sort().join() === [...APPS].sort().join(),
-    "Missing or unexpected apps.",
-  );
-  for (const app of APPS) {
-    const entries = m.apps[app];
-    requireCondition(
-      Array.isArray(entries) && entries.length > 0,
-      `${app}: no versions in this release.`,
-    );
-    const keys: number[][] = [];
-    for (const entry of entries) {
-      const version = entry?.version;
-      requireCondition(
-        typeof version === "string" && /^[A-Za-z0-9._-]+$/.test(version),
-        `${app}: invalid version.`,
-      );
-      const key = versionKey(version);
-      requireCondition(key, `${app}: unorderable version ${version}.`);
-      keys.push(key);
-      requireCondition(
-        typeof entry.commit === "string" && /^[0-9a-f]{40}$/.test(entry.commit),
-        `${app} ${version}: invalid commit.`,
-      );
-      // The last sector of the partition holds the version record.
-      checkImage(
-        `${app} ${version}`,
-        entry,
-        `${app}-${version}.bin`,
-        partition(app).offset,
-        partition(app).size - SECTOR,
-      );
-    }
-    for (let i = 1; i < keys.length; i++)
-      requireCondition(
-        compareKeys(keys[i - 1], keys[i]) > 0,
-        `${app}: versions must be unique and newest first.`,
-      );
+  for (const [id, release] of Object.entries(m.boards)) {
+    board(id); // Rejects boards this flasher does not know.
+    validateBoard(id, release);
   }
   return m;
 }
-export function validateImage(data: Uint8Array, app: boolean): void {
+export function validateImage(
+  data: Uint8Array,
+  app: boolean,
+  flashSize = 0x1000000,
+): void {
   const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
   requireCondition(
     data.length >= 48 && data[0] === 0xe9 && data[1] > 0 && data[1] <= 16,
     "Invalid ESP image header.",
   );
   requireCondition(
-    view.getUint16(12, true) === 9 && data[3] >> 4 === 4 && data[23] === 1,
-    "Image must target ESP32-S3, 16 MiB flash, with SHA-256.",
+    view.getUint16(12, true) === 9 &&
+      data[3] >> 4 === flashSizeCode(flashSize) &&
+      data[23] === 1,
+    `Image must target ESP32-S3, ${flashSize >> 20} MiB flash, with SHA-256.`,
   );
   let pos = 24,
     checksum = 0xef;
@@ -317,12 +417,17 @@ export function validateImage(data: Uint8Array, app: boolean): void {
     "Missing application descriptor.",
   );
 }
-export function validateAsset(image: Image, kind: ImageKind, data: Uint8Array) {
+export function validateAsset(
+  image: Image,
+  kind: ImageKind,
+  data: Uint8Array,
+  flashSize: number,
+) {
   requireCondition(
     data.length === image.size && hash(data) === image.sha256,
     `${image.file}: download checksum/size mismatch. Retry the download.`,
   );
-  if (kind !== "partitions") validateImage(data, kind === "app");
+  if (kind !== "partitions") validateImage(data, kind === "app", flashSize);
 }
 export type Versions = Partial<Record<App, string>>;
 export interface Planned {
@@ -331,7 +436,7 @@ export interface Planned {
 }
 // The release images an operation writes, in write order.
 export function plannedImages(
-  m: Manifest,
+  release: BoardRelease,
   op: Operation,
   versions: Versions = {},
 ): Planned[] {
@@ -349,26 +454,25 @@ export function plannedImages(
         : [];
   return [
     ...apps.map((app) => ({
-      image: selectApp(m, app, versions[app]) as Image,
+      image: selectApp(release, app, versions[app]) as Image,
       kind: "app" as ImageKind,
     })),
     ...shared.map((name) => ({
-      image: m.images[name],
+      image: release.images[name],
       kind: (name === "selector" ? "app" : name) as ImageKind,
     })),
   ];
 }
-export function backup(
-  bytes: Uint8Array,
-  mac: string,
-  board: string,
-): Uint8Array {
-  requireCondition(bytes.length === FLASH_SIZE, "Backup is incomplete.");
+export function backup(bytes: Uint8Array, mac: string, id: string): Uint8Array {
+  requireCondition(
+    bytes.length === board(id).flash_size,
+    "Backup is incomplete.",
+  );
   const metadata = new TextEncoder().encode(
     JSON.stringify({
       format: "coretastic-backup-v1",
       mac,
-      board,
+      board: id,
       size: bytes.length,
       sha256: hash(bytes),
       created: new Date().toISOString(),
@@ -382,11 +486,14 @@ export function backup(
 export function restoreBackup(
   input: Uint8Array,
   mac: string,
-  board: string,
+  id: string,
 ): Uint8Array {
+  const size = board(id).flash_size;
+  // Backups name the board they came from; older ones used revision-specific names.
+  const compatible = [id, ...board(id).backup_aliases];
   requireCondition(
-    input.length === FLASH_SIZE + 4096,
-    "Backup has wrong length.",
+    input.length === size + 4096,
+    "Backup has the wrong length for this board.",
   );
   const header = input.slice(0, 4096);
   const end = header.indexOf(0);
@@ -405,7 +512,7 @@ export function restoreBackup(
     format,
     mac: owner,
     board: origin,
-    size,
+    size: recorded,
     sha256,
   } = meta as Record<string, unknown>;
   const bytes = input.slice(4096);
@@ -414,14 +521,13 @@ export function restoreBackup(
       typeof owner === "string" &&
       owner.toLowerCase() === mac.toLowerCase() &&
       typeof origin === "string" &&
-      COMPATIBLE_BACKUP_BOARDS[origin] === true &&
-      COMPATIBLE_BACKUP_BOARDS[board] === true &&
-      size === FLASH_SIZE,
+      compatible.includes(origin) &&
+      recorded === size,
     "Backup belongs to another board or has incompatible metadata.",
   );
   requireCondition(sha256 === hash(bytes), "Backup checksum mismatch.");
   requireCondition(
-    hash(bytes.slice(0x8000, 0x9000)) === hash(partitionBinary()),
+    hash(bytes.slice(0x8000, 0x9000)) === hash(partitionBinary(id)),
     "Backup does not contain this dual-boot layout. Use the original firmware recovery tool.",
   );
   return bytes;
