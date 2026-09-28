@@ -2,6 +2,7 @@
   "meshcore": {
     "repository": "https://github.com/meshcore-dev/MeshCore.git",
     "environment": "coretastic-meshcore",
+    "release_tag_prefix": "companion-v",
     "versions": [
       {
         "version": "companion-v1.17.1",
@@ -20,6 +21,7 @@
   "meshtastic": {
     "repository": "https://github.com/meshtastic/firmware.git",
     "environment": "coretastic-meshtastic",
+    "release_tag_prefix": "v",
     "versions": [
       {
         "version": "v2.7.26.54e0d8d",

@@ -168,6 +168,18 @@ npm run format:check --prefix web && npm run lint --prefix web
 
 ### Adding an upstream version
 
+New stable releases are picked up automatically. The daily [Upstream sync](.github/workflows/upstream-sync.yml) workflow runs `scripts/firmware/sync_upstream.py` for each app. When a stable release newer than every locked version appears, it:
+
+- locks the release's commit, seeds `<app>/versions/<version>/` from the newest existing version, drops the oldest to keep three, and moves the submodule;
+- checks that every board's upstream environment still exists, that the patches apply, and that upstream did not change the dependency or platform settings the pins were made for;
+- builds the new version for every board, checks the isolation links, and opens a pull request. The pull request is a draft if anything needs attention, with the failing patch or changed setting spelled out.
+
+Nothing is merged or released automatically. Review the pull request against the checklist it contains, and fix patches or pins on its branch when needed. To decline a version, close its pull request and keep the `upstream-sync/<app>-<version>` branch; the workflow skips versions that already have one. Preview a run locally with `python scripts/firmware/sync_upstream.py meshcore --dry-run`.
+
+The workflow needs **Settings → Actions → General → Allow GitHub Actions to create and approve pull requests**, or an `UPSTREAM_SYNC_TOKEN` repository secret (a fine-grained token with contents and pull request write access). Only pull requests opened with that token trigger CI; with the default token, CI starts once you push to the branch.
+
+To adopt a version by hand (for example an older one, or when the automation cannot):
+
 1. Confirm the version is a stable upstream release whose Heltec V4 target drives both front ends (GC1109 on V4.2, KCT8103L on V4.3).
 2. Add it to `upstream-lock.json` (newest first) with its full commit hash, and drop the oldest entry to keep three.
 3. Create `<app>/versions/<version>/` with `integration.ini`, `dependencies.json`, and `patches/`, starting from the nearest existing version. Rebase the patches until `git apply --check` passes, and pin every dependency the upstream build resolves.
@@ -182,7 +194,7 @@ meshcore/         versions/<version>/ integration config and patches; upstream s
 meshtastic/       versions/<version>/ integration config and patches; upstream submodule (newest)
 scripts/          Python tooling
   device/         flash.py, layout.py, test.py
-  firmware/       build.py, prepare.py, integration.cpp, pio_integration.py, oled_brand.py
+  firmware/       build.py, prepare.py, sync_upstream.py, integration.cpp, pio_integration.py, oled_brand.py
   release/        package.py, validate_release.py, source_bundle.py, restore_git.py
 web/              Browser flasher (Vite/TypeScript)
 tests/            Host and Python tests (selector, screens, flash, layout)
