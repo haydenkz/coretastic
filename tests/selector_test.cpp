@@ -1,5 +1,6 @@
 #include "selector_state.h"
 #include "storage_boundary.h"
+#include <algorithm>
 #include <cassert>
 #include <cstdint>
 int main() {
@@ -22,15 +23,19 @@ int main() {
   assert(wrap.selection() == 0);
   assert(!wrap.update(false, 4898));
   assert(wrap.update(false, 4899));
-  using coretastic::storage_write_allowed;
-  assert(storage_write_allowed(true, 0xa00000, 0x10000));
-  assert(!storage_write_allowed(true, 0xa00000, 0x10001));
-  assert(!storage_write_allowed(true, 0xa10000, 4096));
-  assert(!storage_write_allowed(false, 0xa20000, 4096));
-  assert(storage_write_allowed(false, 0xffffff, 1));
-  assert(!storage_write_allowed(false, 0xffffff, 2));
-  assert(!storage_write_allowed(false, 0xffffff, SIZE_MAX));
-  for (uint32_t address = 0; address < 0xa00000; address += 4096) {
+  // Runs once per board against its generated layout.
+  using namespace coretastic;
+  assert(storage_write_allowed(true, kMcNvsOffset, kMcNvsSize));
+  assert(!storage_write_allowed(true, kMcNvsOffset, kMcNvsSize + 1));
+  assert(!storage_write_allowed(true, kMtNvsOffset, 4096));
+  assert(!storage_write_allowed(false, kMcFsOffset, 4096));
+  const uint32_t last = kMtFsOffset + kMtFsSize - 1;
+  assert(storage_write_allowed(false, last, 1));
+  assert(!storage_write_allowed(false, last, 2));
+  assert(!storage_write_allowed(false, last, SIZE_MAX));
+  const uint32_t storage = std::min({kMcNvsOffset, kMcFsOffset, kMtNvsOffset, kMtFsOffset});
+  // Nothing below the settings partitions (boot data and every app) is writable.
+  for (uint32_t address = 0; address < storage; address += 4096) {
     assert(!storage_write_allowed(true, address, 4096));
     assert(!storage_write_allowed(false, address, 4096));
   }

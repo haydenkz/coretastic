@@ -1,0 +1,16 @@
+{
+  "name": "Heltec WiFi LoRa 32 V4.2/V4.3 OLED",
+  "experimental": false,
+  "layout": "heltec-v4-dual-v1",
+  "flash_size": 16777216,
+  "usb": ["303a:1001"],
+  "backup_aliases": ["heltec-v4.2-oled", "heltec-v4.3-oled"],
+  "legacy_versions": {
+    "meshcore": "companion-v1.17.0",
+    "meshtastic": "v2.7.26.54e0d8d"
+  },
+  "environments": {
+    "meshcore": "heltec_v4_companion_radio_ble",
+    "meshtastic": "heltec-v4"
+  }
+}

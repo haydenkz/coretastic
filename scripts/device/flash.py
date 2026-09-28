@@ -11,11 +11,12 @@ from pathlib import Path
 
 from layout import (
     APPS,
-    BOARDS,
-    FLASH_SIZE,
     SECTOR,
     SETTINGS,
     app_record,
+    board,
+    boards,
+    flash_size,
     installed_version,
     load_manifest,
     partition,
@@ -25,11 +26,9 @@ from layout import (
     sha,
 )
 
-COMPATIBLE_BACKUP_BOARDS = {*BOARDS, "heltec-v4.2-oled", "heltec-v4.3-oled"}
-
 
 def make_backup(data, mac, board):
-    if len(data) != FLASH_SIZE:
+    if len(data) != flash_size(board):
         raise ValueError("Incomplete flash read")
     metadata = json.dumps(
         dict(format="coretastic-backup-v1", mac=mac, board=board, size=len(data), sha256=sha(data))
@@ -37,9 +36,12 @@ def make_backup(data, mac, board):
     return metadata.ljust(4096, b"\0") + data
 
 
-def read_backup(data, mac, board):
-    if len(data) != FLASH_SIZE + 4096:
-        raise ValueError("Wrong backup length")
+def read_backup(data, mac, board_id):
+    size = flash_size(board_id)
+    # Backups name the board they came from; older ones used revision-specific names.
+    compatible = {board_id, *board(board_id)["backup_aliases"]}
+    if len(data) != size + 4096:
+        raise ValueError("Wrong backup length for this board")
     try:
         meta = json.loads(data[:4096].split(b"\0", 1)[0])
     except ValueError:
@@ -51,22 +53,28 @@ def read_backup(data, mac, board):
         meta.get("format") != "coretastic-backup-v1"
         or not isinstance(meta.get("mac"), str)
         or meta["mac"].lower() != mac.lower()
-        or meta.get("board") not in COMPATIBLE_BACKUP_BOARDS
-        or board not in COMPATIBLE_BACKUP_BOARDS
-        or meta.get("size") != FLASH_SIZE
+        or meta.get("board") not in compatible
+        or meta.get("size") != size
         or meta.get("sha256") != sha(flash)
     ):
         raise ValueError("Backup metadata, device identity, or checksum mismatch")
-    if flash[0x8000:0x9000] != partition_binary():
+    if flash[0x8000:0x9000] != partition_binary(board_id):
         raise ValueError(
             "Backup is not a compatible dual-boot layout; use the original firmware recovery tool"
         )
     return flash
 
 
-def select_app(manifest, component, version=None):
-    """Returns the manifest entry for a version, defaulting to the newest."""
-    entries = manifest["apps"][component]
+def board_release(manifest, board_id):
+    release = manifest["boards"].get(board_id)
+    if release is None:
+        raise ValueError(f"This release has no images for {board_id}")
+    return release
+
+
+def select_app(release, component, version=None):
+    """Returns the release entry for a version, defaulting to the newest."""
+    entries = release["apps"][component]
     if version is None:
         return entries[0]
     for entry in entries:
@@ -76,25 +84,27 @@ def select_app(manifest, component, version=None):
     raise ValueError(f"{component} {version} is not in this release; available: {available}")
 
 
-def plan(manifest, operation, read, versions=None, erase_settings=False):
+def plan(manifest, board_id, operation, read, versions=None, erase_settings=False):
     """Returns (offset, source) writes; a source is a manifest image or raw bytes."""
     versions = versions or {}
+    release = board_release(manifest, board_id)
     if operation != "install":
-        if read(0x8000, 4096) != partition_binary():
+        if read(0x8000, 4096) != partition_binary(board_id):
             raise ValueError("Incompatible installed layout: back up, then use install --erase")
         if operation != "recovery":
-            boot = manifest["images"]["bootloader"]
+            boot = release["images"]["bootloader"]
             if sha(read(0, boot["size"])) != boot["sha256"]:
                 raise ValueError("Bootloader differs: run recovery first")
     writes = []
     for component in APPS if operation == "install" else [operation] if operation in APPS else []:
-        entry = select_app(manifest, component, versions.get(component))
+        entry = select_app(release, component, versions.get(component))
         writes.append((entry["offset"], entry))
         record = app_record(component, entry["version"], entry["sha256"])
-        writes.append((record_offset(component), record))
+        offset = record_offset(board_id, component)
+        writes.append((offset, record))
         if operation == "install":
             continue  # The whole chip is erased.
-        installed = installed_version(component, read(record_offset(component), SECTOR))
+        installed = installed_version(board_id, component, read(offset, SECTOR))
         required = settings_erase_required(installed, entry["version"])
         if required and not erase_settings:
             raise ValueError(
@@ -104,12 +114,12 @@ def plan(manifest, operation, read, versions=None, erase_settings=False):
             )
         if erase_settings:
             for name in SETTINGS[component]:
-                part = partition(name)
+                part = partition(board_id, name)
                 writes.append((part["offset"], b"\xff" * part["size"]))
     shared = {"install": ["selector", "partitions", "bootloader"], "selector": ["selector"]}
     shared["recovery"] = shared["install"]
     for name in shared.get(operation, []):
-        writes.append((manifest["images"][name]["offset"], manifest["images"][name]))
+        writes.append((release["images"][name]["offset"], release["images"][name]))
     # Erased OTA metadata returns to the factory selector after a USB operation.
     writes.append((0xE000, b"\xff" * 8192))
     return writes
@@ -118,12 +128,20 @@ def plan(manifest, operation, read, versions=None, erase_settings=False):
 def execute(args):
     import esptool
 
+    profile = board(args.board)
+    if profile["experimental"] and not getattr(args, "experimental", False):
+        raise ValueError(
+            f"{profile['name']} support is experimental and untested on hardware; "
+            "back up first and pass --experimental to continue"
+        )
+    size = flash_size(args.board)
     # Validate the entire bundle before opening the device or issuing any command.
     manifest = None if args.operation in ("backup", "restore") else load_manifest(args.manifest)
     versions = {component: getattr(args, f"{component}_version", None) for component in APPS}
     if manifest:
+        release = board_release(manifest, args.board)
         for component, version in versions.items():
-            select_app(manifest, component, version)
+            select_app(release, component, version)
     if args.operation in ("install", "restore") and not args.erase:
         raise ValueError(
             "This operation overwrites all flash. Download a backup, then supply --erase"
@@ -146,17 +164,19 @@ def execute(args):
             raise ValueError("Secure Boot / encrypted devices are unsupported")
         # The stub initializes the flash interface; ROM download mode does not.
         esp = esp.run_stub()
-        if (esp.flash_id() >> 16) & 255 != 24:
-            raise ValueError("Expected 16 MiB physical flash")
+        # The JEDEC capacity byte is log2 of the size in bytes.
+        if (esp.flash_id() >> 16) & 255 != size.bit_length() - 1:
+            raise ValueError(f"Expected {size >> 20} MiB physical flash for {profile['name']}")
         mac = ":".join(f"{b:02x}" for b in esp.read_mac())
         print(
-            f"Validated ESP32-S3, 16 MiB flash, MAC {mac}; physical board confirmation: {args.board}"
+            f"Validated ESP32-S3, {size >> 20} MiB flash, MAC {mac}; "
+            f"physical board confirmation: {args.board}"
         )
-        esp.flash_set_parameters(FLASH_SIZE)
+        esp.flash_set_parameters(size)
         esp.change_baud(460800)
         if args.operation == "backup":
             # Exclusive creation prevents accidental replacement of a previous backup.
-            data = make_backup(esp.read_flash(0, FLASH_SIZE), mac, args.board)
+            data = make_backup(esp.read_flash(0, size), mac, args.board)
             with Path(args.file).open("xb") as output:
                 output.write(data)
             print(f"Saved private full-flash backup: {args.file}")
@@ -170,7 +190,9 @@ def execute(args):
                 files = [(0, path)]
             else:
                 erase_settings = getattr(args, "erase_settings", False)
-                writes = plan(manifest, args.operation, esp.read_flash, versions, erase_settings)
+                writes = plan(
+                    manifest, args.board, args.operation, esp.read_flash, versions, erase_settings
+                )
                 # Snapshot validated bytes to prevent source files changing during write.
                 files = []
                 for offset, source in writes:
@@ -242,8 +264,18 @@ def main():
     parser.add_argument(
         "--board",
         required=True,
-        choices=BOARDS,
-        help="Confirm a Heltec V4.2/V4.3 OLED; R8/TFT/V3 are unsupported",
+        choices=list(boards()),
+        help="Confirm the board printed on the PCB: "
+        + "; ".join(
+            f"{board_id} = {profile['name']}"
+            + (" (experimental)" if profile["experimental"] else "")
+            for board_id, profile in boards().items()
+        ),
+    )
+    parser.add_argument(
+        "--experimental",
+        action="store_true",
+        help="Allow boards whose support is untested on hardware",
     )
     parser.add_argument("--manifest", type=Path, default=Path("release/manifest.json"))
     parser.add_argument("--file", type=Path)

@@ -2,10 +2,10 @@
 
 <img src="web/src/assets/CORETASTIC.png" alt="Coretastic" width="360">
 
-**Dual-boot selector and USB flasher for MeshCore and Meshtastic on one Heltec board.**
+**Dual-boot selector and USB flasher for MeshCore and Meshtastic on one ESP32-S3 LoRa board.**
 
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
-[![Board](https://img.shields.io/badge/board-Heltec%20V4.2%2FV4.3%20OLED-informational)](#supported-hardware)
+[![Board](https://img.shields.io/badge/board-Heltec%20V4.2%2FV4.3%20OLED%20%C2%B7%20V3%20(experimental)-informational)](#supported-hardware)
 [![MeshCore](https://img.shields.io/badge/MeshCore-companion--v1.16.0%20to%20v1.17.1-2f8f5f)](#supported-hardware)
 [![Meshtastic](https://img.shields.io/badge/Meshtastic-v2.7.26.54e0d8d-67b168)](#supported-hardware)
 
@@ -28,11 +28,14 @@ Each firmware occupies a fixed flash slot with separate settings and Bluetooth i
 
 ## Supported hardware
 
-| Board | Flash | Target firmware |
-| --- | --- | --- |
-| Heltec WiFi LoRa 32 **V4.2 / V4.3 OLED** | 16 MiB | MeshCore `companion-v1.17.1`, `companion-v1.17.0`, `companion-v1.16.0`; Meshtastic `v2.7.26.54e0d8d` |
+| Board | `--board` | Flash | USB | Status |
+| --- | --- | --- | --- | --- |
+| Heltec WiFi LoRa 32 **V4.2 / V4.3 OLED** | `heltec-v4-oled` | 16 MiB | Native USB (`303a:1001`) | Supported |
+| Heltec WiFi LoRa 32 **V3** | `heltec-v3` | 8 MiB | CP2102 bridge (`10c4:ea60`) | **Experimental** — builds and passes host tests; not yet run on hardware |
 
-Not supported: V3, V4 R8, and TFT variants. USB cannot identify the PCB family — the flasher checks the ESP32-S3 and physical flash size, and you confirm the board.
+Every board gets the same app versions: MeshCore `companion-v1.17.1`, `companion-v1.17.0`, `companion-v1.16.0`, and Meshtastic `v2.7.26.54e0d8d`. Experimental boards are hidden in the web flasher until you tick **Show experimental boards**, and the CLI requires `--experimental`; back up first.
+
+Not supported: V4 R8 and TFT variants (different display power and front-end pins), and non-ESP32 boards such as nRF52 or RP2040, which cannot dual-boot this way. USB cannot identify the PCB — the flasher checks the ESP32-S3, the board's USB interface, and its physical flash size, and you confirm the board.
 
 Secure Boot and flash encryption must be **disabled**; the flasher rejects enabled devices.
 
@@ -52,7 +55,7 @@ Keep the flasher and firmware bundle from the **same Coretastic build**. Do not 
 ### Backup, updates, recovery
 
 - **Component update** — write only the selected app version and boot metadata, preserving all settings. Installing an *older* version than the one on the device erases that app's settings (and only that app's), because older firmware may not read what a newer one saved; the flasher requires you to confirm this.
-- **Full backup** — read the entire 16 MiB flash into a `.ctbackup` file (includes keys and pairings).
+- **Full backup** — read the entire flash into a `.ctbackup` file (includes keys and pairings). A backup restores only onto the same board type.
 - **Restore** — overwrite the full flash after matching checksums, board, MAC, and partition layout.
 - **Selector/bootloader recovery** — repair shared boot files while preserving both apps and their settings.
 
@@ -67,7 +70,7 @@ npm run dev --prefix web
 
 No Android USB flashing configuration is validated yet; use a desktop browser or the CLI.
 
-The flasher filters the browser picker to the Heltec V4 native USB serial interface. On Linux, choose **Espressif USB JTAG/serial debug unit**. If it is absent, verify access to `/dev/ttyACM*` and close serial monitors, ModemManager, or brltty.
+The flasher filters the browser picker to the selected board's USB serial interface. On Linux, choose **Espressif USB JTAG/serial debug unit** for the V4 or **CP2102 USB to UART Bridge Controller** for the V3. If it is absent, verify access to `/dev/ttyACM*` (V4) or `/dev/ttyUSB*` (V3) and close serial monitors, ModemManager, or brltty.
 
 ## Command-line flasher
 
@@ -82,6 +85,9 @@ python scripts/device/flash.py install --port /dev/ttyACM0 --board heltec-v4-ole
 python scripts/device/flash.py meshcore --port /dev/ttyACM0 --board heltec-v4-oled --manifest release/manifest.json
 python scripts/device/flash.py recovery --port /dev/ttyACM0 --board heltec-v4-oled --manifest release/manifest.json
 python scripts/device/flash.py restore --port /dev/ttyACM0 --board heltec-v4-oled --file before.ctbackup --erase
+
+# Experimental Heltec V3 (CP2102 serial port)
+python scripts/device/flash.py install --port /dev/ttyUSB0 --board heltec-v3 --experimental --manifest release/manifest.json --erase
 ```
 
 `install` and app updates use the newest version in the release unless you pass `--meshcore-version` or `--meshtastic-version` (for example `--meshcore-version companion-v1.16.0`); an unknown version lists the available ones. Installing an older app version also needs `--erase-settings`.
@@ -117,7 +123,15 @@ mkdir -p web/public/releases && cp release/*.bin release/manifest.json release/S
 npm run build --prefix web
 ```
 
-`release/` must not already exist when packaging. `build.py all` builds the selector and every locked app version; `build.py meshcore --version companion-v1.16.0` builds one. Builds use disposable `.build/<app>/<version>/` checkouts with that version's patches applied in filename order; upstream submodules stay unchanged apart from fetched commits.
+`release/` must not already exist when packaging. `build.py all` builds the selector and every locked app version for every board; narrow it with `--version companion-v1.16.0` and `--board heltec-v3`. Builds use disposable `.build/<app>/<version>/` checkouts with that version's patches applied in filename order; upstream submodules stay unchanged apart from fetched commits.
+
+### Adding a board
+
+1. The board must be ESP32-S3 with at least 8 MiB of flash, a MeshCore BLE companion target, and a Meshtastic target in every locked version.
+2. Create `boards/<id>/` with `board.json` (name, flash size, USB IDs, upstream environment names, `"experimental": true`), `partitions.csv` (the same partition names; `otadata` at `0xe000`), and `sdkconfig.defaults` (flash size, partition file, console).
+3. Add the board's pins to `include/board_profile.h` from its schematic: OLED, `Vext`, button, and every RF pin that must stay safe while the selector runs. Drive nothing the schematic does not assign.
+4. Add a `[env:selector-<id>]` to `platformio.ini`. App environments are generated per board by `prepare.py`.
+5. Build, package, and validate. Keep the board experimental until someone has tested switching, radio, and pairing on real hardware.
 
 ### Adding an upstream version
 
@@ -141,7 +155,8 @@ scripts/          Python tooling
   device/         flash.py, layout.py, test.py
   firmware/       build.py, prepare.py, integration.cpp, pio_integration.py, oled_brand.py
   release/        package.py, validate_release.py, source_bundle.py, restore_git.py
-src/ include/     Native ESP-IDF selector (src is an IDF component)
+boards/           Per-board profile, partition table, and selector SDK settings
+src/ include/     Native ESP-IDF selector (src is an IDF component); board_profile.h holds pins
 meshcore/         versions/<version>/ integration config and patches; upstream submodule (newest)
 meshtastic/       versions/<version>/ integration config and patches; upstream submodule (newest)
 web/              Browser flasher (Vite/TypeScript)
@@ -150,8 +165,8 @@ tests/            Host + Python tests (selector, screens, flash, layout)
 
 ## Troubleshooting
 
-- **No USB port** — use a data cable, close serial monitors, enter ROM recovery (PRG + RESET), and use HTTPS or localhost. On Linux, select **Espressif USB JTAG/serial debug unit**, verify access to `/dev/ttyACM0`, and check that ModemManager or brltty is not holding it.
-- **Wrong flash size / chip** — stop: offsets are only defined for the 16 MiB board.
+- **No USB port** — use a data cable, close serial monitors, enter ROM recovery (PRG + RESET), and use HTTPS or localhost. On Linux, select **Espressif USB JTAG/serial debug unit** (V4) or **CP2102 USB to UART Bridge Controller** (V3), verify access to `/dev/ttyACM0` or `/dev/ttyUSB0`, and check that ModemManager or brltty is not holding it.
+- **Wrong flash size / chip** — stop: check that the selected board matches the PCB; each layout is defined for one flash size.
 - **Pairing fails after reset/restore of one firmware** — forget that firmware's BLE device in Android and pair again.
 - **Layout mismatch on update** — use recovery for a compatible table, or back up and do a destructive install.
 

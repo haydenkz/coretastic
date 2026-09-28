@@ -32,8 +32,13 @@ def main():
         "__wrap_esp_ota_begin",
     ]
     builds = [
-        (component, f"{component} {entry['version']}", f"{component}-{entry['version']}-*.map")
-        for component, entries in manifest["apps"].items()
+        (
+            component,
+            f"{board_id} {component} {entry['version']}",
+            f"{board_id}-{component}-{entry['version']}-*.map",
+        )
+        for board_id, release in manifest["boards"].items()
+        for component, entries in release["apps"].items()
         for entry in entries
     ]
     for component, label, pattern in builds:

@@ -1,3 +1,4 @@
+#include "board_profile.h"
 #include "driver/gpio.h"
 #include "driver/rtc_io.h"
 #include "esp_log.h"
@@ -25,23 +26,21 @@ extern "C" void app_main() {
   // Upstream deep sleep can retain pad holds. The selector's software reboot
   // hides that wake cause from the next application, so release them here.
   gpio_deep_sleep_hold_dis();
-  const gpio_num_t retained[] = {GPIO_NUM_0,  GPIO_NUM_7,  GPIO_NUM_8,
-                                 GPIO_NUM_14, GPIO_NUM_21, GPIO_NUM_36};
-  for (gpio_num_t pin : retained) {
+  for (gpio_num_t pin : coretastic::kRetainedPins) {
     if (rtc_gpio_is_valid_gpio(pin)) {
       rtc_gpio_hold_dis(pin);
       rtc_gpio_deinit(pin);
     }
     gpio_hold_dis(pin);
   }
-  gpio_set_direction(GPIO_NUM_7, GPIO_MODE_OUTPUT);
-  gpio_set_level(GPIO_NUM_7, 0); // RF PA off while selecting.
-  gpio_set_direction(GPIO_NUM_8, GPIO_MODE_OUTPUT);
-  gpio_set_level(GPIO_NUM_8, 1); // Radio chip select inactive.
+  for (const coretastic::PinLevel &output : coretastic::kSafeOutputs) {
+    gpio_set_direction(output.pin, GPIO_MODE_OUTPUT);
+    gpio_set_level(output.pin, output.level);
+  }
   const esp_err_t display = oled_init();
   ESP_LOGI(tag, "OLED: %s", esp_err_to_name(display));
   gpio_config_t button{};
-  button.pin_bit_mask = 1ULL << GPIO_NUM_0;
+  button.pin_bit_mask = 1ULL << coretastic::kButton;
   button.mode = GPIO_MODE_INPUT;
   button.pull_up_en = GPIO_PULLUP_ENABLE;
   // Failures stop on the error screen; ESP_ERROR_CHECK would abort into a reboot loop.
@@ -64,7 +63,7 @@ extern "C" void app_main() {
   uint32_t drawn = now_ms() - 200;
   for (;;) {
     const uint32_t now = now_ms();
-    if (state.update(gpio_get_level(GPIO_NUM_0) == 0, now))
+    if (state.update(gpio_get_level(coretastic::kButton) == 0, now))
       break;
     if (uint32_t(now - drawn) >= 100) {
       oled_show_selector(state.selection(), state.seconds(now));

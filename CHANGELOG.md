@@ -4,7 +4,9 @@
 
 - Choose the MeshCore and Meshtastic version when installing or updating, in the web flasher and the CLI (`--meshcore-version`, `--meshtastic-version`). Releases offer MeshCore `companion-v1.17.1`, `companion-v1.17.0`, and `companion-v1.16.0`, and Meshtastic `v2.7.26.54e0d8d` (the only stable release that supports the V4.3 LoRa front end).
 - The flasher records each app's installed version and requires erasing that app's settings before installing an older version.
-- Release manifest schema 2 lists every app version; the corresponding-source archive bundles each version's sources.
+- Experimental Heltec WiFi LoRa 32 V3 support: an 8 MiB dual-boot layout, a V3 selector build, per-board app builds, and CP2102 USB in the flasher. It is hidden unless you opt in (web: *Show experimental boards*; CLI: `--experimental`) because it has not been tested on hardware.
+- Boards are defined in `boards/<id>/` (profile, partition table, selector SDK settings); the flash write guard's bounds are generated per board.
+- Release manifest schema 3 lists images per board and every app version; files are named `<board>-<image>.bin`. The corresponding-source archive bundles each version's sources.
 
 ## v0.1.0 - 2026-09-14
 

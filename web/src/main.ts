@@ -1,14 +1,21 @@
 import "./style.css";
 import {
   APPS,
-  BOARD,
+  BOARDS,
   backup,
+  board as boardProfile,
   plannedImages,
   restoreBackup,
   settingsEraseRequired,
   validateManifest,
 } from "./contract";
-import type { App, Manifest, Operation, Versions } from "./contract";
+import type {
+  App,
+  BoardRelease,
+  Manifest,
+  Operation,
+  Versions,
+} from "./contract";
 import { UsbDevice, inspect, program } from "./flasher";
 const el = <T extends HTMLElement>(id: string) =>
   document.getElementById(id) as T;
@@ -37,11 +44,42 @@ function selectedVersions(): Versions {
     if (versionSelect(app).value) versions[app] = versionSelect(app).value;
   return versions;
 }
+const boardSelect = el<HTMLSelectElement>("board-select"),
+  showExperimental = el<HTMLInputElement>("show-experimental");
+const selectedBoard = () => boardSelect.value;
+const selectedRelease = (): BoardRelease | undefined =>
+  manifest?.boards[selectedBoard()];
+// Boards this release ships (or every known board before it loads), with
+// experimental ones only on request.
+function populateBoards() {
+  const previous = selectedBoard();
+  const offered = Object.values(BOARDS).filter(
+    (profile) =>
+      (!manifest || profile.id in manifest.boards) &&
+      (!profile.experimental ||
+        showExperimental.checked ||
+        profile.id === previous),
+  );
+  boardSelect.replaceChildren(
+    ...offered.map(
+      (profile) =>
+        new Option(
+          profile.experimental
+            ? `${profile.name} (experimental)`
+            : profile.name,
+          profile.id,
+        ),
+    ),
+  );
+  if (offered.some((profile) => profile.id === previous))
+    boardSelect.value = previous;
+  populateVersions();
+}
 function populateVersions() {
   for (const app of APPS) {
     const select = versionSelect(app);
     select.replaceChildren(
-      ...(manifest?.apps[app] ?? []).map(
+      ...(selectedRelease()?.apps[app] ?? []).map(
         ({ version }) => new Option(version, version),
       ),
     );
@@ -136,7 +174,7 @@ function refresh() {
   const destructive = ["install", "restore"].includes(op);
   const restore = op === "restore";
   const apps = APPS.filter((app) => op === "install" || op === app);
-  el("versions-field").hidden = apps.length === 0 || !manifest;
+  el("versions-field").hidden = apps.length === 0 || !selectedRelease();
   for (const app of APPS) {
     el(`version-${app}-field`).hidden = !apps.includes(app);
     versionSelect(app).disabled = busy;
@@ -178,24 +216,28 @@ function refresh() {
   el("operation-title").textContent = ui.button;
   const noSerial = !("serial" in navigator) || !isSecureContext;
   el<HTMLButtonElement>("connect").disabled =
-    busy || !!device || !board.checked || noSerial;
+    busy || !!device || !board.checked || !selectedBoard() || noSerial;
   el<HTMLButtonElement>("disconnect").disabled = busy || !device;
   const needsManifest = !["backup", "restore"].includes(op);
   el<HTMLButtonElement>("run").disabled =
     busy ||
     !device ||
-    (needsManifest && !manifest) ||
+    (needsManifest && !selectedRelease()) ||
     (destructive && !el<HTMLInputElement>("confirmation").checked) ||
     (eraseRequired && !eraseSettings.checked) ||
     (restore && !restoreFile);
   board.disabled = busy || !!device;
+  boardSelect.disabled = showExperimental.disabled = busy || !!device;
+  el("board-warning").hidden = !BOARDS[selectedBoard()]?.experimental;
   for (const control of modes) control.disabled = busy;
   for (const control of updateTargets) control.disabled = busy;
   for (const control of backupActions) control.disabled = busy;
   el<HTMLInputElement>("backup-file").disabled = busy;
   hint.textContent =
-    !busy && device && needsManifest && !manifest
-      ? "Waiting for the release manifest."
+    !busy && device && needsManifest && !selectedRelease()
+      ? manifest
+        ? "This release has no images for the selected board."
+        : "Waiting for the release manifest."
       : !busy && device && restore && !restoreFile
         ? "Select a .ctbackup file."
         : !busy &&
@@ -226,7 +268,7 @@ el("connect").onclick = () =>
   task(async () => {
     setProgress(0);
     setStatus("Connecting to ROM loader…", "working");
-    device = await UsbDevice.connect(log, setProgress, () => {
+    device = await UsbDevice.connect(selectedBoard(), log, setProgress, () => {
       device = undefined;
       installed = {};
       const message = "USB device disconnected. Reconnect before retrying.";
@@ -234,7 +276,7 @@ el("connect").onclick = () =>
       log(message);
       refresh();
     });
-    installed = (await inspect(device)).installed;
+    installed = (await inspect(device, device.board)).installed;
     setStatus(`Connected: ${device.mac}`, "success");
   });
 el("disconnect").onclick = () =>
@@ -251,13 +293,15 @@ el("run").onclick = () =>
     setStatus("Working. Keep USB connected.", "working");
     const op = selectedOperation;
     const versions = selectedVersions();
+    // The board is fixed while connected, so the device's board is authoritative.
+    const boardId = device.board;
     log(
-      `Operation ${op}; board ${BOARD}; release ${manifest?.version ?? "unavailable"}; ${APPS.map((app) => `${app} ${versions[app] ?? "-"}`).join(", ")}`,
+      `Operation ${op}; board ${boardId}; release ${manifest?.version ?? "unavailable"}; ${APPS.map((app) => `${app} ${versions[app] ?? "-"}`).join(", ")}`,
     );
     if (op === "backup") {
-      const bytes = await device.read(0, 0x1000000);
+      const bytes = await device.read(0, boardProfile(boardId).flash_size);
       download(
-        backup(bytes, device.mac, BOARD),
+        backup(bytes, device.mac, boardId),
         `coretastic-${device.mac.replaceAll(":", "")}-${Date.now()}.ctbackup`,
       );
     } else if (op === "restore") {
@@ -268,16 +312,18 @@ el("run").onclick = () =>
       const bytes = restoreBackup(
         new Uint8Array(await file.arrayBuffer()),
         device.mac,
-        BOARD,
+        boardId,
       );
       await device.restore(bytes);
     } else {
-      if (!manifest) throw new Error("Release manifest unavailable.");
+      const release = selectedRelease();
+      if (!manifest || !release)
+        throw new Error("This release has no images for the selected board.");
       if (op === "install" && !el<HTMLInputElement>("confirmation").checked)
         throw new Error("Confirm erase first.");
       const assets = new Map<string, Uint8Array>();
       for (const { image } of plannedImages(
-        manifest,
+        release,
         op as Operation,
         versions,
       )) {
@@ -293,6 +339,7 @@ el("run").onclick = () =>
       await program(
         device,
         manifest,
+        boardId,
         op as Operation,
         assets,
         versions,
@@ -300,7 +347,7 @@ el("run").onclick = () =>
       );
     }
     // The device may have disconnected; otherwise show what is now installed.
-    if (device) installed = (await inspect(device)).installed;
+    if (device) installed = (await inspect(device, device.board)).installed;
     const done =
       op === "backup"
         ? "Backup downloaded."
@@ -317,6 +364,15 @@ el("logs").onclick = () =>
     "text/plain",
   );
 board.onchange = refresh;
+boardSelect.onchange = () => {
+  board.checked = false;
+  populateVersions();
+  changeOperation();
+};
+showExperimental.onchange = () => {
+  populateBoards();
+  refresh();
+};
 function changeOperation() {
   el<HTMLInputElement>("confirmation").checked = false;
   eraseSettings.checked = false;
@@ -345,6 +401,7 @@ el("theme").onclick = () => {
     localStorage.setItem("coretastic-theme", dark ? "dark" : "light");
   } catch {}
 };
+populateBoards();
 refresh();
 void task(async () => {
   const response = await fetch(
@@ -356,12 +413,9 @@ void task(async () => {
       `Release manifest unavailable (HTTP ${response.status}). Backups remain available.`,
     );
   manifest = validateManifest(await response.json());
-  populateVersions();
-  const offered = (app: App) => {
-    const count = manifest!.apps[app].length;
-    return `${APP_NAMES[app]} ${count} version${count === 1 ? "" : "s"}`;
-  };
+  populateBoards();
+  const count = Object.keys(manifest.boards).length;
   el("release").textContent =
-    `Release ${manifest.version} · ${APPS.map(offered).join(" · ")}`;
+    `Release ${manifest.version} · ${count} board${count === 1 ? "" : "s"}`;
   log(el("release").textContent!);
 });
