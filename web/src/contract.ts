@@ -4,7 +4,9 @@ import { md5 } from "@noble/hashes/legacy.js";
 import { bytesToHex } from "@noble/hashes/utils.js";
 
 export const FLASH_SIZE = 0x1000000;
+export const SECTOR = 4096;
 export const LAYOUT = "heltec-v4-dual-v1";
+export const MANIFEST_SCHEMA = 2;
 export const BOARD = "heltec-v4-oled";
 export const BOARDS = [BOARD];
 export const partitions = csv
@@ -18,14 +20,34 @@ export const partitions = csv
   });
 export const hash = (bytes: Uint8Array) => bytesToHex(sha256(bytes));
 export const md5hex = (bytes: Uint8Array) => bytesToHex(md5(bytes));
-export type Component = "selector" | "meshcore" | "meshtastic";
-export type ImageName = Component | "bootloader" | "partitions";
+export const APPS = ["meshcore", "meshtastic"] as const;
+export type App = (typeof APPS)[number];
+export type Component = "selector" | App;
+export type SharedImage = "selector" | "bootloader" | "partitions";
 export type Operation = "install" | "recovery" | Component;
+export type ImageKind = "app" | "bootloader" | "partitions";
+// Each app's private settings; a downgrade erases them because older firmware
+// may not read what a newer version wrote.
+export const SETTINGS: Record<App, string[]> = {
+  meshcore: ["mc_nvs", "mc_fs"],
+  meshtastic: ["mt_nvs", "mt_fs"],
+};
+// The flasher records the installed version in the last sector of each app
+// partition. Coretastic v0.1.0 wrote no record and shipped exactly these.
+export const RECORD_FORMAT = "coretastic-app-v1";
+export const LEGACY_VERSIONS: Record<App, string> = {
+  meshcore: "companion-v1.17.0",
+  meshtastic: "v2.7.26.54e0d8d",
+};
 export interface Image {
   file: string;
   offset: number;
   size: number;
   sha256: string;
+}
+export interface AppImage extends Image {
+  version: string;
+  commit: string;
 }
 export interface Manifest {
   schema: number;
@@ -36,8 +58,8 @@ export interface Manifest {
   boards: string[];
   partitions: typeof partitions;
   storage_epoch: Record<Component, number>;
-  images: Record<ImageName, Image>;
-  upstream: Record<string, { version: string; commit: string }>;
+  images: Record<SharedImage, Image>;
+  apps: Record<App, AppImage[]>;
 }
 const COMPATIBLE_BACKUP_BOARDS: Record<string, true> = {
   [BOARD]: true,
@@ -76,13 +98,96 @@ export function partitionBinary(): Uint8Array {
   data.set(md5(data.slice(0, pos)), pos + 16);
   return data;
 }
-const expected = Object.fromEntries(
-  partitions
-    .filter((p) => p.type === "app")
-    .map((p) => [p.name, [p.offset, p.size]]),
-);
-expected.bootloader = [0, 0x8000];
-expected.partitions = [0x8000, 4096];
+export function partition(name: string) {
+  const found = partitions.find((p) => p.name === name);
+  requireCondition(found, `Unknown partition ${name}.`);
+  return found;
+}
+export const recordOffset = (app: App) =>
+  partition(app).offset + partition(app).size - SECTOR;
+// Orders upstream tags such as companion-v1.17.1 and v2.7.26.54e0d8d.
+export function versionKey(version: unknown): number[] | null {
+  const match =
+    typeof version === "string" ? /(\d+)\.(\d+)\.(\d+)/.exec(version) : null;
+  return match ? match.slice(1).map(Number) : null;
+}
+function compareKeys(a: number[], b: number[]): number {
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return a[i] - b[i];
+  return 0;
+}
+export function appRecord(app: App, version: string, sha256: string) {
+  const data = new Uint8Array(SECTOR).fill(255);
+  const json = JSON.stringify({
+    format: RECORD_FORMAT,
+    component: app,
+    version,
+    sha256,
+  });
+  const bytes = new TextEncoder().encode(json);
+  data.set(bytes);
+  data[bytes.length] = 0;
+  return data;
+}
+// The installed version from its record, or null if it cannot be identified.
+export function installedVersion(app: App, record: Uint8Array): string | null {
+  if (record[0] === 255) return LEGACY_VERSIONS[app];
+  const end = record.indexOf(0);
+  let meta: unknown;
+  try {
+    meta = JSON.parse(
+      new TextDecoder().decode(record.subarray(0, end < 0 ? undefined : end)),
+    );
+  } catch {
+    return null;
+  }
+  if (!meta || typeof meta !== "object") return null;
+  const { format, component, version } = meta as Record<string, unknown>;
+  return format === RECORD_FORMAT &&
+    component === app &&
+    typeof version === "string" &&
+    versionKey(version)
+    ? version
+    : null;
+}
+// Moving to an older (or unidentifiable) version must erase that app's settings.
+export function settingsEraseRequired(
+  installed: string | null,
+  target: string,
+): boolean {
+  const from = versionKey(installed),
+    to = versionKey(target);
+  return !from || !to || compareKeys(to, from) < 0;
+}
+export function selectApp(m: Manifest, app: App, version?: string) {
+  const entries = m.apps[app];
+  const entry = version
+    ? entries.find((e) => e.version === version)
+    : entries[0];
+  requireCondition(entry, `${app} ${version} is not in this release.`);
+  return entry;
+}
+function checkImage(
+  label: string,
+  image: Image | undefined,
+  file: string,
+  offset: number,
+  limit: number,
+) {
+  requireCondition(
+    image && image.file === file && image.offset === offset,
+    `${label}: invalid filename or address.`,
+  );
+  requireCondition(
+    Number.isSafeInteger(image.size) &&
+      image.size > 0 &&
+      Math.ceil(image.size / SECTOR) * SECTOR <= limit,
+    `${label}: image exceeds partition.`,
+  );
+  requireCondition(
+    typeof image.sha256 === "string" && /^[a-f0-9]{64}$/.test(image.sha256),
+    `${label}: invalid checksum.`,
+  );
+}
 export function validateManifest(input: unknown): Manifest {
   requireCondition(
     input && typeof input === "object",
@@ -90,7 +195,7 @@ export function validateManifest(input: unknown): Manifest {
   );
   const m = input as Manifest;
   requireCondition(
-    m.schema === 1 && m.layout === LAYOUT,
+    m.schema === MANIFEST_SCHEMA && m.layout === LAYOUT,
     "Unsupported release layout. Use its matching flasher.",
   );
   requireCondition(
@@ -114,39 +219,68 @@ export function validateManifest(input: unknown): Manifest {
       m.storage_epoch?.[name] === 1,
       `Incompatible ${name} settings format.`,
     );
-  for (const name of ["meshcore", "meshtastic"])
-    requireCondition(
-      typeof m.upstream?.[name]?.version === "string",
-      `Missing ${name} upstream version.`,
-    );
+  const shared: Record<SharedImage, [number, number]> = {
+    selector: [partition("selector").offset, partition("selector").size],
+    bootloader: [0, 0x8000],
+    partitions: [0x8000, SECTOR],
+  };
   requireCondition(
     m.images &&
-      Object.keys(m.images).sort().join() ===
-        Object.keys(expected).sort().join(),
+      Object.keys(m.images).sort().join() === Object.keys(shared).sort().join(),
     "Missing or unexpected images.",
   );
-  for (const [name, [offset, limit]] of Object.entries(expected)) {
-    const img = m.images[name as ImageName];
-    requireCondition(
-      img.file === `${name}.bin` && img.offset === offset,
-      `${name}: invalid filename or address.`,
+  for (const [name, [offset, limit]] of Object.entries(shared))
+    checkImage(
+      name,
+      m.images[name as SharedImage],
+      `${name}.bin`,
+      offset,
+      limit,
     );
-    requireCondition(
-      Number.isSafeInteger(img.size) &&
-        img.size > 0 &&
-        Math.ceil(img.size / 4096) * 4096 <= limit,
-      `${name}: image exceeds partition.`,
-    );
-    requireCondition(
-      /^[a-f0-9]{64}$/.test(img.sha256),
-      `${name}: invalid checksum.`,
-    );
-  }
   requireCondition(
-    m.images.partitions.size === 4096 &&
+    m.images.partitions.size === SECTOR &&
       m.images.partitions.sha256 === hash(partitionBinary()),
     "Partition checksum does not match layout.",
   );
+  requireCondition(
+    m.apps && Object.keys(m.apps).sort().join() === [...APPS].sort().join(),
+    "Missing or unexpected apps.",
+  );
+  for (const app of APPS) {
+    const entries = m.apps[app];
+    requireCondition(
+      Array.isArray(entries) && entries.length > 0,
+      `${app}: no versions in this release.`,
+    );
+    const keys: number[][] = [];
+    for (const entry of entries) {
+      const version = entry?.version;
+      requireCondition(
+        typeof version === "string" && /^[A-Za-z0-9._-]+$/.test(version),
+        `${app}: invalid version.`,
+      );
+      const key = versionKey(version);
+      requireCondition(key, `${app}: unorderable version ${version}.`);
+      keys.push(key);
+      requireCondition(
+        typeof entry.commit === "string" && /^[0-9a-f]{40}$/.test(entry.commit),
+        `${app} ${version}: invalid commit.`,
+      );
+      // The last sector of the partition holds the version record.
+      checkImage(
+        `${app} ${version}`,
+        entry,
+        `${app}-${version}.bin`,
+        partition(app).offset,
+        partition(app).size - SECTOR,
+      );
+    }
+    for (let i = 1; i < keys.length; i++)
+      requireCondition(
+        compareKeys(keys[i - 1], keys[i]) > 0,
+        `${app}: versions must be unique and newest first.`,
+      );
+  }
   return m;
 }
 export function validateImage(data: Uint8Array, app: boolean): void {
@@ -183,20 +317,46 @@ export function validateImage(data: Uint8Array, app: boolean): void {
     "Missing application descriptor.",
   );
 }
-export function validateAsset(m: Manifest, name: ImageName, data: Uint8Array) {
-  const image = m.images[name];
+export function validateAsset(image: Image, kind: ImageKind, data: Uint8Array) {
   requireCondition(
     data.length === image.size && hash(data) === image.sha256,
-    `${name}: download checksum/size mismatch. Retry the download.`,
+    `${image.file}: download checksum/size mismatch. Retry the download.`,
   );
-  if (name !== "partitions") validateImage(data, name !== "bootloader");
+  if (kind !== "partitions") validateImage(data, kind === "app");
 }
-export function imageNames(op: Operation): ImageName[] {
-  return op === "install"
-    ? ["meshcore", "meshtastic", "selector", "partitions", "bootloader"]
-    : op === "recovery"
+export type Versions = Partial<Record<App, string>>;
+export interface Planned {
+  image: Image;
+  kind: ImageKind;
+}
+// The release images an operation writes, in write order.
+export function plannedImages(
+  m: Manifest,
+  op: Operation,
+  versions: Versions = {},
+): Planned[] {
+  const apps: App[] =
+    op === "install"
+      ? [...APPS]
+      : op === "meshcore" || op === "meshtastic"
+        ? [op]
+        : [];
+  const shared: SharedImage[] =
+    op === "install" || op === "recovery"
       ? ["selector", "partitions", "bootloader"]
-      : [op];
+      : op === "selector"
+        ? ["selector"]
+        : [];
+  return [
+    ...apps.map((app) => ({
+      image: selectApp(m, app, versions[app]) as Image,
+      kind: "app" as ImageKind,
+    })),
+    ...shared.map((name) => ({
+      image: m.images[name],
+      kind: (name === "selector" ? "app" : name) as ImageKind,
+    })),
+  ];
 }
 export function backup(
   bytes: Uint8Array,

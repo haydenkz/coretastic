@@ -321,6 +321,35 @@
               Repair boot files
             </label>
           </fieldset>
+          <div
+            id="versions-field"
+            hidden
+            class="mt-3 grid gap-2 sm:grid-cols-2"
+          >
+            <label id="version-meshcore-field" class="block">
+              <span class="text-sm font-medium text-gray-700 dark:text-gray-300"
+                >MeshCore version</span
+              >
+              <select
+                id="version-meshcore"
+                class="mt-1.5 block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
+              ></select>
+            </label>
+            <label id="version-meshtastic-field" class="block">
+              <span class="text-sm font-medium text-gray-700 dark:text-gray-300"
+                >Meshtastic version</span
+              >
+              <select
+                id="version-meshtastic"
+                class="mt-1.5 block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
+              ></select>
+            </label>
+          </div>
+          <p
+            id="installed"
+            hidden
+            class="mt-2 text-xs text-gray-500 dark:text-gray-400"
+          ></p>
           <fieldset
             id="backup-action-field"
             hidden
@@ -414,6 +443,18 @@
               class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-800"
             />
             Erase existing settings
+          </label>
+          <label
+            id="settings-field"
+            hidden
+            class="mt-3 flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300"
+          >
+            <input
+              id="erase-settings"
+              type="checkbox"
+              class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-800"
+            />
+            <span id="erase-settings-label">Erase this app's settings</span>
           </label>
 
           <button

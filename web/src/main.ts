@@ -1,13 +1,15 @@
 import "./style.css";
 import {
+  APPS,
   BOARD,
   backup,
+  plannedImages,
   restoreBackup,
-  imageNames,
+  settingsEraseRequired,
   validateManifest,
 } from "./contract";
-import type { ImageName, Manifest, Operation } from "./contract";
-import { UsbDevice, program } from "./flasher";
+import type { App, Manifest, Operation, Versions } from "./contract";
+import { UsbDevice, inspect, program } from "./flasher";
 const el = <T extends HTMLElement>(id: string) =>
   document.getElementById(id) as T;
 const status = el("status"),
@@ -21,6 +23,30 @@ let device: UsbDevice | undefined,
   manifest: Manifest | undefined,
   busy = false,
   selectedOperation = "install";
+// Versions read from the connected device; empty when unknown.
+let installed: Partial<Record<App, string | null>> = {};
+const APP_NAMES: Record<App, string> = {
+  meshcore: "MeshCore",
+  meshtastic: "Meshtastic",
+};
+const versionSelect = (app: App) => el<HTMLSelectElement>(`version-${app}`);
+const eraseSettings = el<HTMLInputElement>("erase-settings");
+function selectedVersions(): Versions {
+  const versions: Versions = {};
+  for (const app of APPS)
+    if (versionSelect(app).value) versions[app] = versionSelect(app).value;
+  return versions;
+}
+function populateVersions() {
+  for (const app of APPS) {
+    const select = versionSelect(app);
+    select.replaceChildren(
+      ...(manifest?.apps[app] ?? []).map(
+        ({ version }) => new Option(version, version),
+      ),
+    );
+  }
+}
 const board = el<HTMLInputElement>("board"),
   updateTargets = [
     ...document.querySelectorAll<HTMLInputElement>(
@@ -37,11 +63,13 @@ const modes = [
 ];
 const operationUi: Record<string, { description: string; button: string }> = {
   meshcore: {
-    description: "Keeps existing MeshCore settings.",
+    description:
+      "Keeps existing MeshCore settings unless you install an older version.",
     button: "Update MeshCore",
   },
   meshtastic: {
-    description: "Keeps existing Meshtastic settings.",
+    description:
+      "Keeps existing Meshtastic settings unless you install an older version.",
     button: "Update Meshtastic",
   },
   selector: {
@@ -107,6 +135,40 @@ function refresh() {
   el("install-field").hidden = mode !== "install";
   const destructive = ["install", "restore"].includes(op);
   const restore = op === "restore";
+  const apps = APPS.filter((app) => op === "install" || op === app);
+  el("versions-field").hidden = apps.length === 0 || !manifest;
+  for (const app of APPS) {
+    el(`version-${app}-field`).hidden = !apps.includes(app);
+    versionSelect(app).disabled = busy;
+    for (const [index, option] of [...versionSelect(app).options].entries())
+      option.text = [
+        option.value,
+        index === 0 ? "newest" : "",
+        installed[app] === option.value ? "installed" : "",
+      ]
+        .filter(Boolean)
+        .join(" · ");
+  }
+  const inspected = device && Object.keys(installed).length > 0;
+  el("installed").hidden = !inspected;
+  el("installed").textContent = `Installed: ${APPS.map(
+    (app) => `${APP_NAMES[app]} ${installed[app] ?? "unidentified"}`,
+  ).join(" · ")}`;
+  // Only an app update can keep or erase that app's settings.
+  const updated = apps.length === 1 && op !== "install" ? apps[0] : undefined;
+  el("settings-field").hidden = !updated;
+  const eraseRequired =
+    !!updated &&
+    !!inspected &&
+    settingsEraseRequired(
+      installed[updated] ?? null,
+      versionSelect(updated).value,
+    );
+  eraseSettings.disabled = busy;
+  if (updated)
+    el("erase-settings-label").textContent = eraseRequired
+      ? `Erase ${APP_NAMES[updated]} settings (required: older than the installed ${installed[updated] ?? "unidentified version"})`
+      : `Erase ${APP_NAMES[updated]} settings`;
   const restoreFile = el<HTMLInputElement>("backup-file").files?.[0];
   el("erase-field").hidden = !destructive;
   el("restore-field").hidden = !restore;
@@ -124,6 +186,7 @@ function refresh() {
     !device ||
     (needsManifest && !manifest) ||
     (destructive && !el<HTMLInputElement>("confirmation").checked) ||
+    (eraseRequired && !eraseSettings.checked) ||
     (restore && !restoreFile);
   board.disabled = busy || !!device;
   for (const control of modes) control.disabled = busy;
@@ -140,7 +203,9 @@ function refresh() {
             destructive &&
             !el<HTMLInputElement>("confirmation").checked
           ? "Confirm that existing settings can be erased."
-          : "";
+          : !busy && eraseRequired && !eraseSettings.checked
+            ? "Installing an older version erases that app's settings. Back up first, then confirm."
+            : "";
   hint.hidden = !hint.textContent;
 }
 async function task(action: () => Promise<void>) {
@@ -163,17 +228,20 @@ el("connect").onclick = () =>
     setStatus("Connecting to ROM loader…", "working");
     device = await UsbDevice.connect(log, setProgress, () => {
       device = undefined;
+      installed = {};
       const message = "USB device disconnected. Reconnect before retrying.";
       setStatus(message, "error");
       log(message);
       refresh();
     });
+    installed = (await inspect(device)).installed;
     setStatus(`Connected: ${device.mac}`, "success");
   });
 el("disconnect").onclick = () =>
   task(async () => {
     await device?.disconnect();
     device = undefined;
+    installed = {};
     setStatus("Disconnected. Press RESET to boot.");
   });
 el("run").onclick = () =>
@@ -182,8 +250,9 @@ el("run").onclick = () =>
     setProgress(0);
     setStatus("Working. Keep USB connected.", "working");
     const op = selectedOperation;
+    const versions = selectedVersions();
     log(
-      `Operation ${op}; board ${BOARD}; release ${manifest?.version ?? "unavailable"}`,
+      `Operation ${op}; board ${BOARD}; release ${manifest?.version ?? "unavailable"}; ${APPS.map((app) => `${app} ${versions[app] ?? "-"}`).join(", ")}`,
     );
     if (op === "backup") {
       const bytes = await device.read(0, 0x1000000);
@@ -206,19 +275,32 @@ el("run").onclick = () =>
       if (!manifest) throw new Error("Release manifest unavailable.");
       if (op === "install" && !el<HTMLInputElement>("confirmation").checked)
         throw new Error("Confirm erase first.");
-      const assets = new Map<ImageName, Uint8Array>();
-      for (const name of imageNames(op as Operation)) {
+      const assets = new Map<string, Uint8Array>();
+      for (const { image } of plannedImages(
+        manifest,
+        op as Operation,
+        versions,
+      )) {
         const response = await fetch(
-          new URL(`releases/${manifest.images[name].file}`, document.baseURI),
+          new URL(`releases/${image.file}`, document.baseURI),
           // A stale cached image would fail its checksum on every retry.
           { cache: "no-cache" },
         );
         if (!response.ok)
-          throw new Error(`Download ${name}: HTTP ${response.status}.`);
-        assets.set(name, new Uint8Array(await response.arrayBuffer()));
+          throw new Error(`Download ${image.file}: HTTP ${response.status}.`);
+        assets.set(image.file, new Uint8Array(await response.arrayBuffer()));
       }
-      await program(device, manifest, op as Operation, assets);
+      await program(
+        device,
+        manifest,
+        op as Operation,
+        assets,
+        versions,
+        eraseSettings.checked,
+      );
     }
+    // The device may have disconnected; otherwise show what is now installed.
+    if (device) installed = (await inspect(device)).installed;
     const done =
       op === "backup"
         ? "Backup downloaded."
@@ -226,6 +308,7 @@ el("run").onclick = () =>
     setStatus(done, "success");
     log(done);
     el<HTMLInputElement>("confirmation").checked = false;
+    eraseSettings.checked = false;
   });
 el("logs").onclick = () =>
   download(
@@ -236,6 +319,7 @@ el("logs").onclick = () =>
 board.onchange = refresh;
 function changeOperation() {
   el<HTMLInputElement>("confirmation").checked = false;
+  eraseSettings.checked = false;
   setProgress(0);
   refresh();
 }
@@ -243,6 +327,8 @@ for (const control of modes) control.onchange = changeOperation;
 for (const control of updateTargets) control.onchange = changeOperation;
 for (const control of backupActions) control.onchange = changeOperation;
 el("confirmation").onchange = refresh;
+eraseSettings.onchange = refresh;
+for (const app of APPS) versionSelect(app).onchange = changeOperation;
 el("backup-file").onchange = refresh;
 const serialAvailable = isSecureContext && "serial" in navigator;
 if (!serialAvailable) {
@@ -270,7 +356,12 @@ void task(async () => {
       `Release manifest unavailable (HTTP ${response.status}). Backups remain available.`,
     );
   manifest = validateManifest(await response.json());
+  populateVersions();
+  const offered = (app: App) => {
+    const count = manifest!.apps[app].length;
+    return `${APP_NAMES[app]} ${count} version${count === 1 ? "" : "s"}`;
+  };
   el("release").textContent =
-    `Release ${manifest.version} · MeshCore ${manifest.upstream.meshcore.version} · Meshtastic ${manifest.upstream.meshtastic.version}`;
+    `Release ${manifest.version} · ${APPS.map(offered).join(" · ")}`;
   log(el("release").textContent!);
 });

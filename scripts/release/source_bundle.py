@@ -10,10 +10,12 @@ import tarfile
 import tempfile
 from pathlib import Path
 
-# Release tooling imports layout from the sibling scripts/device directory.
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "device"))
+# Release tooling imports modules from the sibling scripts/ directories.
+_scripts = Path(__file__).resolve().parents[1]
+sys.path[:0] = [str(_scripts / "device"), str(_scripts / "firmware")]
 
-from layout import ROOT, sha
+from layout import APPS, ROOT, sha
+from prepare import build_dir, lock
 
 EXCLUDED = {
     ".git",
@@ -57,27 +59,53 @@ def main():
     with tarfile.open(archive, "w:gz", compresslevel=6) as tar:
         tar.add(ROOT, arcname="coretastic", filter=source_filter)
         # Clean bundles retain commit identities needed by the build/version checks,
-        # without copying local Git config, credentials, hooks, or reflogs.
-        repositories = {
-            "coretastic": ROOT,
-            "meshcore": ROOT / "meshcore/upstream",
-            "meshtastic": ROOT / "meshtastic/upstream",
-            "protobufs": ROOT / "meshtastic/upstream/protobufs",
-            "meshtestic": ROOT / "meshtastic/upstream/meshtestic",
-        }
+        # without copying local Git config, credentials, hooks, or reflogs. The index
+        # tells restore_git.py where each bundle belongs; every app version ships its
+        # own upstream and nested submodule commits.
+        repositories = [("coretastic", ROOT, "", None)]
+        locked = lock()
+        for component in APPS:
+            for record in locked[component]["versions"]:
+                version = record["version"]
+                checkout = build_dir(component, version)
+                ref = f"refs/coretastic/{version}"
+                name = f"{component}-{version}"
+                repositories.append((name, checkout, f"{component}/upstream", ref))
+                nested = subprocess.check_output(
+                    ["git", "submodule", "--quiet", "foreach", "--recursive", "echo $displaypath"],
+                    cwd=checkout,
+                    text=True,
+                ).split()
+                for path in nested:
+                    repositories.append(
+                        (
+                            f"{name}-{path.replace('/', '_')}",
+                            checkout / path,
+                            f"{component}/upstream/{path}",
+                            ref,
+                        )
+                    )
+        index = []
         with tempfile.TemporaryDirectory(prefix="coretastic-source-") as temporary:
-            for name, repository in repositories.items():
+            for name, repository, path, ref in repositories:
                 bundle = Path(temporary) / f"{name}.bundle"
                 subprocess.run(
                     ["git", "bundle", "create", str(bundle), "HEAD"], cwd=repository, check=True
                 )
                 subprocess.run(["git", "bundle", "verify", str(bundle)], cwd=repository, check=True)
                 tar.add(bundle, arcname=f"bundles/{name}.bundle")
-        for component in ["meshcore", "meshtastic"]:
-            deps = ROOT / ".build" / component / ".pio/libdeps" / f"coretastic-{component}"
-            if not deps.is_dir():
-                raise ValueError(f"Missing built dependency sources: {deps}")
-            tar.add(deps, arcname=f"dependencies/{component}", filter=source_filter)
+                index.append(dict(bundle=f"{name}.bundle", path=path, ref=ref))
+            index_file = Path(temporary) / "index.json"
+            index_file.write_text(json.dumps(index, indent=2) + "\n")
+            tar.add(index_file, arcname="bundles/index.json")
+        for component in APPS:
+            environment = locked[component]["environment"]
+            for record in locked[component]["versions"]:
+                version = record["version"]
+                deps = build_dir(component, version) / ".pio/libdeps" / environment
+                if not deps.is_dir():
+                    raise ValueError(f"Missing built dependency sources: {deps}")
+                tar.add(deps, arcname=f"dependencies/{component}-{version}", filter=source_filter)
         web_packages = subprocess.check_output(
             ["npm", "ls", "--omit=dev", "--parseable", "--all"], cwd=ROOT / "web", text=True
         ).splitlines()

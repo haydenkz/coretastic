@@ -1,15 +1,24 @@
 import { ESPLoader, Transport } from "esptool-js";
 import {
+  APPS,
   FLASH_SIZE,
+  SECTOR,
+  SETTINGS,
+  appRecord,
   hash,
+  installedVersion,
   md5hex,
+  partition,
   partitionBinary,
+  plannedImages,
+  recordOffset,
   requireCondition,
+  selectApp,
+  settingsEraseRequired,
   validateAsset,
   validateManifest,
-  imageNames,
 } from "./contract";
-import type { Manifest, Operation, ImageName } from "./contract";
+import type { App, Manifest, Operation, Versions } from "./contract";
 // Native USB Serial/JTAG interface on supported Heltec V4 boards.
 const HELTEC_V4_USB_FILTER: SerialPortFilter = {
   usbVendorId: 0x303a,
@@ -55,19 +64,35 @@ export interface Device {
     eraseAll: boolean,
   ): Promise<void>;
 }
+// What a connected device has installed; versions are only meaningful when
+// the partition table is the dual-boot layout.
+export async function inspect(device: Pick<Device, "read">) {
+  const layout =
+    hash(await device.read(0x8000, SECTOR)) === hash(partitionBinary());
+  const installed: Partial<Record<App, string | null>> = {};
+  if (layout)
+    for (const app of APPS)
+      installed[app] = installedVersion(
+        app,
+        await device.read(recordOffset(app), SECTOR),
+      );
+  return { layout, installed };
+}
 export async function program(
   device: Device,
   manifest: Manifest,
   op: Operation,
-  assets: Map<ImageName, Uint8Array>,
+  assets: Map<string, Uint8Array>,
+  versions: Versions = {},
+  eraseSettings = false,
 ) {
   validateManifest(manifest);
-  const names = imageNames(op);
+  const planned = plannedImages(manifest, op, versions);
   // Validate every byte before the first erase/write, including installed layout.
-  for (const name of names) {
-    const bytes = assets.get(name);
-    requireCondition(bytes, `${name}: asset missing.`);
-    validateAsset(manifest, name, bytes);
+  for (const { image, kind } of planned) {
+    const bytes = assets.get(image.file);
+    requireCondition(bytes, `${image.file}: asset missing.`);
+    validateAsset(image, kind, bytes);
   }
   if (op !== "install") {
     requireCondition(
@@ -82,10 +107,32 @@ export async function program(
       );
     }
   }
-  const files = names.map((name) => ({
-    address: manifest.images[name].offset,
-    data: assets.get(name)!,
+  const files = planned.map(({ image }) => ({
+    address: image.offset,
+    data: assets.get(image.file)!,
   }));
+  for (const app of APPS) {
+    if (op !== "install" && op !== app) continue;
+    const target = selectApp(manifest, app, versions[app]);
+    files.push({
+      address: recordOffset(app),
+      data: appRecord(app, target.version, target.sha256),
+    });
+    if (op === "install") continue; // The whole chip is erased.
+    const installed = installedVersion(
+      app,
+      await device.read(recordOffset(app), SECTOR),
+    );
+    requireCondition(
+      eraseSettings || !settingsEraseRequired(installed, target.version),
+      `${target.version} is older than the installed ${installed ?? "unidentified version"}. Confirm erasing its settings to continue.`,
+    );
+    if (eraseSettings)
+      for (const name of SETTINGS[app]) {
+        const { offset, size } = partition(name);
+        files.push({ address: offset, data: new Uint8Array(size).fill(255) });
+      }
+  }
   // Erased OTA metadata returns to the factory selector after a USB operation.
   files.push({ address: 0xe000, data: new Uint8Array(8192).fill(255) });
   await device.write(files, op === "install");
