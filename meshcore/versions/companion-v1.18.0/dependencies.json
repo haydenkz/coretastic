@@ -27,5 +27,5 @@
   "sensirion/Sensirion Core@0.7.3",
   "sensirion/Sensirion I2C SHT4x@1.1.2",
   "densaugeo/base64@1.4.0",
-  "jgromes/RadioLib@7.7.1"
+  "https://github.com/jgromes/RadioLib.git#6d8934836678d8894e3d556550475b37dce3e2b6"
 ]

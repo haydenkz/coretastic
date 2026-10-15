@@ -1,10 +1,10 @@
 diff --git a/examples/companion_radio/main.cpp b/examples/companion_radio/main.cpp
-index ef9b6bfc..75a37d8c 100644
+index 89f0e6cb..0fc2a6bc 100644
 --- a/examples/companion_radio/main.cpp
 +++ b/examples/companion_radio/main.cpp
-@@ -189,7 +189,7 @@ void setup() {
-   #endif
-     the_mesh.startInterface(serial_interface);
+@@ -171,7 +171,7 @@ void setup() {
+     #endif
+   );
  #elif defined(ESP32)
 -  SPIFFS.begin(true);
 +  SPIFFS.begin(true, "/spiffs", 10, "mc_fs");
