@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.2.1 - 2026-10-18
+
+- Adds MeshCore `companion-v1.18.0`. This release offers MeshCore `companion-v1.18.0`, `companion-v1.17.1`, and `companion-v1.17.0` (`companion-v1.16.0` is no longer offered), and Meshtastic `v2.7.26.54e0d8d`.
+- The web flasher works at <https://haydenkz.github.io/coretastic/>. It was built with absolute asset URLs, which only work at a domain root, so the page loaded without its script and styles.
+- Flasher fixes:
+  - Both flashers erase settings before writing an app and write its version record last, so a retry after an interrupted downgrade asks to erase again.
+  - The web flasher checks every flash read against the device's MD5, as the CLI already did, so a corrupted backup read fails instead of being saved.
+  - A verified operation is no longer reported as failed when the follow-up read of installed versions fails.
+  - The progress bar reaches 100%.
+  - Toggling experimental boards keeps the chosen app versions.
+- Selector fixes:
+  - Short PRG taps register. The OLED is redrawn only when the screen changes, at 400 kHz, so the button is sampled often enough.
+  - The selector releases the GPIO2 and GPIO13 (LoRa BUSY) holds that Meshtastic sets for deep sleep.
+- The corresponding-source archive includes the SDK `sdkconfig.h` headers and nested npm packages it used to drop, and takes only tracked files from this repository.
+- Upstream sync fixes:
+  - A version whose pull request couldn't be opened is no longer skipped without an error.
+  - Closing a sync pull request now declines its versions permanently.
+- Workflows use Node 24 actions.
+- The Python tooling uses urllib3 2.8.0.
+
 ## v0.2.0 - 2026-09-28
 
 - Choose the MeshCore and Meshtastic version when installing or updating, in the web flasher and the CLI (`--meshcore-version`, `--meshtastic-version`). This release offers MeshCore `companion-v1.17.1`, `companion-v1.17.0`, and `companion-v1.16.0`, and Meshtastic `v2.7.26.54e0d8d` (the only stable release that supports the V4.3 LoRa front end).
