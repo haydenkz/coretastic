@@ -6,7 +6,7 @@
 
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
 [![Board](https://img.shields.io/badge/board-Heltec%20V4.2%2FV4.3%20OLED%20%C2%B7%20V3%20(experimental)-informational)](#supported-hardware)
-[![MeshCore](https://img.shields.io/badge/MeshCore-companion--v1.16.0%20to%20v1.17.1-2f8f5f)](#firmware-versions)
+[![MeshCore](https://img.shields.io/badge/MeshCore-companion--v1.17.0%20to%20v1.18.0-2f8f5f)](#firmware-versions)
 [![Meshtastic](https://img.shields.io/badge/Meshtastic-v2.7.26.54e0d8d-67b168)](#firmware-versions)
 
 [Install](#install-and-switch) · [CLI flasher](#command-line-flasher) · [Build & test](#building-and-testing)
@@ -44,7 +44,7 @@ Every board gets the same app versions:
 
 | App | Versions (newest first) |
 | --- | --- |
-| MeshCore | `companion-v1.17.1`, `companion-v1.17.0`, `companion-v1.16.0` |
+| MeshCore | `companion-v1.18.0`, `companion-v1.17.1`, `companion-v1.17.0` |
 | Meshtastic | `v2.7.26.54e0d8d` |
 
 Each release offers up to three of the latest stable upstream versions per app, limited to versions that support both the V4.2 and V4.3 LoRa front ends. Older Meshtastic stable releases (such as `v2.7.15`) only drive the V4.2 front end, so they are not offered. Pinned revisions are recorded in [`upstream-lock.json`](upstream-lock.json).
@@ -107,7 +107,7 @@ python scripts/device/flash.py restore  --port /dev/ttyACM0 --board heltec-v4-ol
 python scripts/device/flash.py install --port /dev/ttyUSB0 --board heltec-v3 --experimental --manifest release/manifest.json --erase
 ```
 
-- `install` and app updates use the newest version in the release unless you pass `--meshcore-version` or `--meshtastic-version` (for example `--meshcore-version companion-v1.16.0`). An unknown version lists the available ones. Installing an older app version also needs `--erase-settings`.
+- `install` and app updates use the newest version in the release unless you pass `--meshcore-version` or `--meshtastic-version` (for example `--meshcore-version companion-v1.17.0`). An unknown version lists the available ones. Installing an older app version also needs `--erase-settings`.
 - On Windows use the matching COM port; on macOS use `/dev/cu.*`.
 - Logs append to `coretastic-flash.log` (change with `--log`). The web flasher downloads its own log.
 
@@ -145,7 +145,7 @@ mkdir -p web/public/releases && cp release/*.bin release/manifest.json release/S
 npm run build --prefix web
 ```
 
-- `build.py all` builds the selector and every locked app version for every board. Narrow it with `--version companion-v1.16.0` and `--board heltec-v3`.
+- `build.py all` builds the selector and every locked app version for every board. Narrow it with `--version companion-v1.17.0` and `--board heltec-v3`.
 - Builds use disposable `.build/<app>/<version>/` checkouts with that version's patches applied in filename order. Upstream submodules stay unchanged apart from fetched commits.
 - `release/` must not already exist when packaging.
 
