@@ -374,6 +374,14 @@ describe("flash contract", () => {
       expect(written.get(offset)).toEqual(new Uint8Array(size).fill(255));
     }
     expect(written.has(partition(V4, "mt_nvs").offset)).toBe(false);
+    // Erase first and record last, so an interrupted downgrade asks to erase again.
+    expect(writes[0].map((f) => f.address)).toEqual([
+      partition(V4, "mc_nvs").offset,
+      partition(V4, "mc_fs").offset,
+      0x100000,
+      recordOffset(V4, "meshcore"),
+      0xe000,
+    ]);
     // Upgrading from a legacy v0.1.0 install keeps settings.
     writes.length = 0;
     await program(
