@@ -44,8 +44,18 @@ jobs:
         id: sync
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          python scripts/firmware/sync_upstream.py "$COMPONENT" --summary "$RUNNER_TEMP/sync.json"
+          # Versions named by an earlier sync pull request (open, merged, or closed)
+          # are not proposed again, so closing one declines its versions.
+          skip=()
+          for version in $(gh pr list --state all --limit 500 --json headRefName,title --jq \
+            ".[] | select(.headRefName | startswith(\"upstream-sync/$COMPONENT-\"))
+              | .title | ltrimstr(\"Adopt $COMPONENT \") | split(\" \")[]"); do
+            skip+=(--skip "$version")
+          done
+          python scripts/firmware/sync_upstream.py "$COMPONENT" --summary "$RUNNER_TEMP/sync.json" \
+            "${skip[@]}"
           python - >> "$GITHUB_OUTPUT" <<'PY'
           import json, os
           summary = json.load(open(os.path.join(os.environ["RUNNER_TEMP"], "sync.json")))

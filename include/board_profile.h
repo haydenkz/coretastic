@@ -20,9 +20,10 @@ constexpr PinLevel kSafeOutputs[] = {
     {GPIO_NUM_7, 0}, // RF PA off while selecting.
     {GPIO_NUM_8, 1}, // Radio chip select inactive.
 };
-// Upstream deep sleep can hold these pads.
-constexpr gpio_num_t kRetainedPins[] = {GPIO_NUM_0,  GPIO_NUM_7,  GPIO_NUM_8,
-                                        GPIO_NUM_14, GPIO_NUM_21, GPIO_NUM_36};
+// Upstream deep sleep can hold these pads; Meshtastic isolates GPIO2 and
+// GPIO13 (LoRa BUSY) and only releases them when it sees the wake cause.
+constexpr gpio_num_t kRetainedPins[] = {GPIO_NUM_0,  GPIO_NUM_2,  GPIO_NUM_7,  GPIO_NUM_8,
+                                        GPIO_NUM_13, GPIO_NUM_14, GPIO_NUM_21, GPIO_NUM_36};
 #elif defined(CORETASTIC_BOARD_HELTEC_V3)
 // V3 Vext is active low and also powers the LoRa antenna boost. There is no
 // separate PA enable, so GPIO7 stays untouched.
@@ -33,8 +34,8 @@ constexpr gpio_num_t kButton = GPIO_NUM_0;
 constexpr PinLevel kSafeOutputs[] = {
     {GPIO_NUM_8, 1}, // Radio chip select inactive.
 };
-constexpr gpio_num_t kRetainedPins[] = {GPIO_NUM_0, GPIO_NUM_8, GPIO_NUM_14, GPIO_NUM_21,
-                                        GPIO_NUM_36};
+constexpr gpio_num_t kRetainedPins[] = {GPIO_NUM_0,  GPIO_NUM_2,  GPIO_NUM_8, GPIO_NUM_13,
+                                        GPIO_NUM_14, GPIO_NUM_21, GPIO_NUM_36};
 #else
 #error "Unknown board: build a selector-<board> environment"
 #endif

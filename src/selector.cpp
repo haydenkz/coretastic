@@ -60,14 +60,20 @@ extern "C" void app_main() {
   uint8_t previous = 0;
   nvs_get_u8(nvs, "selected", &previous);
   coretastic::SelectorState state(previous, now_ms());
-  uint32_t drawn = now_ms() - 200;
+  // Redraw only when the screen changes. Sending a frame blocks this loop, and
+  // a press must be seen by two samples 30 ms apart, so redrawing on a timer
+  // left too few samples to catch a short tap.
+  int drawn_selection = -1;
+  unsigned drawn_seconds = 0;
   for (;;) {
     const uint32_t now = now_ms();
     if (state.update(gpio_get_level(coretastic::kButton) == 0, now))
       break;
-    if (uint32_t(now - drawn) >= 100) {
-      oled_show_selector(state.selection(), state.seconds(now));
-      drawn = now;
+    const unsigned seconds = state.seconds(now);
+    if (state.selection() != drawn_selection || seconds != drawn_seconds) {
+      oled_show_selector(state.selection(), seconds);
+      drawn_selection = state.selection();
+      drawn_seconds = seconds;
     }
     vTaskDelay(pdMS_TO_TICKS(10));
   }
