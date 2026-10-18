@@ -17,31 +17,24 @@ sys.path[:0] = [str(_scripts / "device"), str(_scripts / "firmware")]
 from layout import APPS, ROOT, boards, sha
 from prepare import build_dir, environment, lock
 
-EXCLUDED = {
-    ".git",
-    ".cache",
-    ".build",
-    ".pio",
-    ".venv",
-    "node_modules",
-    "__pycache__",
-    "release",
-    "dist",
-    "releases",
-}
 
-
-def source_filter(info):
-    if any(part in EXCLUDED for part in Path(info.name).parts):
-        return None
-    if (
-        Path(info.name).name.startswith("sdkconfig.")
-        and Path(info.name).name != "sdkconfig.defaults"
-    ):
-        return None
+def normalized(info):
     info.uid = info.gid = 0
     info.uname = info.gname = ""
     return info
+
+
+def package_filter(root):
+    """Third-party trees ship whole, minus Git metadata, caches, and nested npm
+    packages, which are archived on their own."""
+
+    def keep(info):
+        inner = Path(info.name).relative_to(root).parts
+        if any(part in (".git", "__pycache__", "node_modules") for part in inner):
+            return None
+        return normalized(info)
+
+    return keep
 
 
 def main():
@@ -57,7 +50,13 @@ def main():
             raise ValueError(f"Required SDK source package missing: {directory}")
     inventory = {}
     with tarfile.open(archive, "w:gz", compresslevel=6) as tar:
-        tar.add(ROOT, arcname="coretastic", filter=source_filter)
+        # Only tracked files: the working tree can hold backups, flasher logs, and
+        # generated SDK configurations that must not ship.
+        tracked = subprocess.check_output(
+            ["git", "ls-files", "-z", "--recurse-submodules"], cwd=ROOT, text=True
+        )
+        for path in filter(None, tracked.split("\0")):
+            tar.add(ROOT / path, arcname=f"coretastic/{path}", recursive=False, filter=normalized)
         # Clean bundles retain commit identities needed by the build/version checks,
         # without copying local Git config, credentials, hooks, or reflogs. The index
         # tells restore_git.py where each bundle belongs; every app version ships its
@@ -107,7 +106,7 @@ def main():
                     if not deps.is_dir():
                         raise ValueError(f"Missing built dependency sources: {deps}")
                     arcname = f"dependencies/{component}-{version}/{board_id}"
-                    tar.add(deps, arcname=arcname, filter=source_filter)
+                    tar.add(deps, arcname=arcname, filter=package_filter(arcname))
         web_packages = subprocess.check_output(
             ["npm", "ls", "--omit=dev", "--parseable", "--all"], cwd=ROOT / "web", text=True
         ).splitlines()
@@ -116,9 +115,11 @@ def main():
             if directory == ROOT / "web":
                 continue
             relative = directory.relative_to(ROOT / "web/node_modules")
-            tar.add(directory, arcname=f"dependencies/web/{relative}", filter=source_filter)
+            arcname = f"dependencies/web/{relative}"
+            tar.add(directory, arcname=arcname, filter=package_filter(arcname))
         for directory in framework_paths:
-            tar.add(directory, arcname=f"sdk/{directory.name}", filter=source_filter)
+            arcname = f"sdk/{directory.name}"
+            tar.add(directory, arcname=arcname, filter=package_filter(arcname))
             inventory[directory.name] = json.loads((directory / "package.json").read_text())[
                 "version"
             ]

@@ -28,6 +28,11 @@ class SyncTests(unittest.TestCase):
             ["companion-v1.18.1", "companion-v1.18.0"],
         )
         self.assertEqual(new_releases(releases[:1], "v", ["v2.7.26.54e0d8d"]), [])
+        # A version with a pending or declined pull request is not proposed again.
+        self.assertEqual(
+            new_releases(releases, "companion-v", locked, {"companion-v1.18.0"}),
+            ["companion-v1.18.1"],
+        )
 
     def test_locked_versions_stay_newest_first_and_bounded(self):
         locked = [dict(version=f"v2.7.{n}.x") for n in (26, 20, 15)]

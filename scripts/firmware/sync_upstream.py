@@ -43,8 +43,10 @@ def repository_slug(url):
     return url.removeprefix("https://github.com/").removesuffix(".git")
 
 
-def new_releases(releases, prefix, locked):
-    """Stable, orderable release tags newer than every locked version, newest first."""
+def new_releases(releases, prefix, locked, skip=()):
+    """Stable, orderable release tags newer than every locked version, newest first.
+
+    Versions in skip already have a pull request (pending or declined)."""
     newest = max(version_key(version) for version in locked)
     tags = {
         release["tag_name"]
@@ -52,6 +54,7 @@ def new_releases(releases, prefix, locked):
         if not release["draft"]
         and not release["prerelease"]
         and release["tag_name"].startswith(prefix)
+        and release["tag_name"] not in skip
         and version_key(release["tag_name"]) is not None
         and version_key(release["tag_name"]) > newest
     }
@@ -131,12 +134,13 @@ def check_patches(checkout, patches):
     return failures
 
 
-def sync(component, keep, dry_run):
+def sync(component, keep, dry_run, skip=()):
     locked = lock()
     entry = locked[component]
     versions = entry["versions"]
     releases = github(f"repos/{repository_slug(entry['repository'])}/releases?per_page=100")
-    tags = new_releases(releases, entry["release_tag_prefix"], [v["version"] for v in versions])
+    locked_names = [v["version"] for v in versions]
+    tags = new_releases(releases, entry["release_tag_prefix"], locked_names, skip)
     summary = dict(
         component=component,
         repository=entry["repository"].removesuffix(".git"),
@@ -227,8 +231,15 @@ def main():
     parser.add_argument("--keep", type=int, default=KEEP, help="Versions to keep per app")
     parser.add_argument("--dry-run", action="store_true", help="Report without changing files")
     parser.add_argument("--summary", type=Path, help="Write a JSON summary for the workflow")
+    parser.add_argument(
+        "--skip",
+        action="append",
+        default=[],
+        metavar="VERSION",
+        help="A version that already has a pull request (repeatable)",
+    )
     args = parser.parse_args()
-    summary = sync(args.component, args.keep, args.dry_run)
+    summary = sync(args.component, args.keep, args.dry_run, set(args.skip))
     print(summary["report"])
     if args.summary:
         args.summary.write_text(json.dumps(summary, indent=2) + "\n")

@@ -42,7 +42,8 @@ esp_err_t oled_init() {
   config.scl_io_num = kOledScl;
   config.sda_pullup_en = GPIO_PULLUP_ENABLE;
   config.scl_pullup_en = GPIO_PULLUP_ENABLE;
-  config.master.clk_speed = 100000;
+  // 400 kHz, as the upstream SSD1306 drivers use; a full frame takes about 23 ms.
+  config.master.clk_speed = 400000;
   esp_err_t err = i2c_param_config(port, &config);
   if (err != ESP_OK)
     return err;
