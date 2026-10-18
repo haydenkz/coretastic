@@ -76,7 +76,9 @@ Both flashers offer the same operations:
 
 ## Web flasher
 
-The browser flasher runs from localhost using Web Serial. It verifies the installed partition table and bootloader, writes only validated compatible images, and lets you download the full browser log.
+Each tagged release publishes the browser flasher at <https://haydenkz.github.io/coretastic/> with that release's bundle. It uses Web Serial (a desktop Chromium-based browser), verifies the installed partition table and bootloader, writes only validated compatible images, and lets you download the full browser log.
+
+To run it locally instead:
 
 ```sh
 npm ci --prefix web
