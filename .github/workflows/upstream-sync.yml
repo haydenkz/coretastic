@@ -28,14 +28,14 @@ jobs:
     env:
       COMPONENT: ${{ matrix.component }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: true
           fetch-depth: 0
           # Pull requests opened with the default token do not trigger CI; an
           # UPSTREAM_SYNC_TOKEN secret (fine-grained PAT or app token) does.
           token: ${{ secrets.UPSTREAM_SYNC_TOKEN || github.token }}
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
           cache: pip
@@ -54,24 +54,31 @@ jobs:
           print("attention=" + ("true" if summary["attention"] else "false"))
           print(f"branch=upstream-sync/{summary['component']}-{adopted[0] if adopted else 'none'}")
           PY
-      - name: Skip versions that already have a branch or pull request
+      - name: Skip versions that already have a pull request
         id: existing
         if: steps.sync.outputs.adopted != ''
         env:
           GH_TOKEN: ${{ github.token }}
           BRANCH: ${{ steps.sync.outputs.branch }}
         run: |
-          # A closed pull request with its branch kept declines that version.
+          # A closed pull request declines that version. A branch without any
+          # pull request is left over from a run that could not open one; open
+          # it as it stands, since someone may have pushed fixes to it.
           prs=$(gh pr list --head "$BRANCH" --state all --json number --jq length)
-          if git ls-remote --exit-code --heads origin "$BRANCH" > /dev/null || [ "$prs" != 0 ]; then
-            echo "$BRANCH already exists; nothing to do."
+          if [ "$prs" != 0 ]; then
+            echo "$BRANCH already has a pull request; nothing to do."
             echo "proceed=false" >> "$GITHUB_OUTPUT"
+          elif git ls-remote --exit-code --heads origin "$BRANCH" > /dev/null; then
+            echo "::warning::$BRANCH exists without a pull request; opening one for it."
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+            echo "branch_exists=true" >> "$GITHUB_OUTPUT"
           else
             echo "proceed=true" >> "$GITHUB_OUTPUT"
+            echo "branch_exists=false" >> "$GITHUB_OUTPUT"
           fi
       - name: Cache PlatformIO packages
-        if: steps.existing.outputs.proceed == 'true'
-        uses: actions/cache@v4
+        if: steps.existing.outputs.branch_exists == 'false'
+        uses: actions/cache@v6
         with:
           path: ~/.platformio
           key: platformio-${{ runner.os }}-${{ hashFiles('platformio.ini', 'requirements.txt') }}
@@ -79,12 +86,12 @@ jobs:
             platformio-${{ runner.os }}-
       - name: Host tests
         id: tests
-        if: steps.existing.outputs.proceed == 'true'
+        if: steps.existing.outputs.branch_exists == 'false'
         continue-on-error: true
         run: python scripts/device/test.py
       - name: Build new versions for every board and check isolation links
         id: build
-        if: steps.existing.outputs.proceed == 'true' && steps.sync.outputs.attention == 'false'
+        if: steps.existing.outputs.branch_exists == 'false' && steps.sync.outputs.attention == 'false'
         continue-on-error: true
         env:
           VERSIONS: ${{ steps.sync.outputs.adopted }}
@@ -103,20 +110,25 @@ jobs:
           TESTS: ${{ steps.tests.outcome }}
           BUILD: ${{ steps.build.outcome }}
           BASE: ${{ github.event.repository.default_branch }}
+          BRANCH_EXISTS: ${{ steps.existing.outputs.branch_exists }}
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
-          git switch -c "$BRANCH"
-          git add upstream-lock.json "$COMPONENT/upstream" "$COMPONENT/versions"
-          git commit -m "Adopt $COMPONENT $VERSIONS"
-          git push origin "$BRANCH"
+          if [ "$BRANCH_EXISTS" = false ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+            git switch -c "$BRANCH"
+            git add upstream-lock.json "$COMPONENT/upstream" "$COMPONENT/versions"
+            git commit -m "Adopt $COMPONENT $VERSIONS"
+            git push origin "$BRANCH"
+          fi
           python - > "$RUNNER_TEMP/body.md" <<'PY'
           import json, os
           env = os.environ
           summary = json.load(open(os.path.join(env["RUNNER_TEMP"], "sync.json")))
           outcome = {"success": "passed", "failure": "**failed**", "skipped": "skipped"}
           build = outcome.get(env["BUILD"], env["BUILD"])
-          if env["BUILD"] == "skipped":
+          if env["BRANCH_EXISTS"] == "true":
+              build += " (an earlier run pushed this branch but could not open this pull request)"
+          elif env["BUILD"] == "skipped":
               build += " (fix the items below first, then push to this branch)"
           notes = [
               f"- [{v} release notes]({summary['repository']}/releases/tag/{v})"
@@ -144,5 +156,10 @@ jobs:
           if [ "$ATTENTION" = true ] || [ "$TESTS" != success ] || [ "$BUILD" != success ]; then
             draft=(--draft)
           fi
-          gh pr create --base "$BASE" --head "$BRANCH" --title "Adopt $COMPONENT $VERSIONS" \
-            --body-file "$RUNNER_TEMP/body.md" "${draft[@]}"
+          if ! gh pr create --base "$BASE" --head "$BRANCH" --title "Adopt $COMPONENT $VERSIONS" \
+            --body-file "$RUNNER_TEMP/body.md" "${draft[@]}"; then
+            echo "::error::Could not open the pull request for $BRANCH. Add an UPSTREAM_SYNC_TOKEN" \
+              "secret or allow GitHub Actions to create pull requests (Settings > Actions > General);" \
+              "the next run retries."
+            exit 1
+          fi
