@@ -95,13 +95,12 @@ def plan(manifest, board_id, operation, read, versions=None, erase_settings=Fals
             boot = release["images"]["bootloader"]
             if sha(read(0, boot["size"])) != boot["sha256"]:
                 raise ValueError("Bootloader differs: run recovery first")
-    writes = []
+    erases, writes, records = [], [], []
     for component in APPS if operation == "install" else [operation] if operation in APPS else []:
         entry = select_app(release, component, versions.get(component))
         writes.append((entry["offset"], entry))
-        record = app_record(component, entry["version"], entry["sha256"])
         offset = record_offset(board_id, component)
-        writes.append((offset, record))
+        records.append((offset, app_record(component, entry["version"], entry["sha256"])))
         if operation == "install":
             continue  # The whole chip is erased.
         installed = installed_version(board_id, component, read(offset, SECTOR))
@@ -115,14 +114,15 @@ def plan(manifest, board_id, operation, read, versions=None, erase_settings=Fals
         if erase_settings:
             for name in SETTINGS[component]:
                 part = partition(board_id, name)
-                writes.append((part["offset"], b"\xff" * part["size"]))
+                erases.append((part["offset"], b"\xff" * part["size"]))
     shared = {"install": ["selector", "partitions", "bootloader"], "selector": ["selector"]}
     shared["recovery"] = shared["install"]
     for name in shared.get(operation, []):
         writes.append((release["images"][name]["offset"], release["images"][name]))
+    # Settings are erased before any image and version records are written last, so an
+    # interrupted downgrade still reads as the newer version and asks to erase again.
     # Erased OTA metadata returns to the factory selector after a USB operation.
-    writes.append((0xE000, b"\xff" * 8192))
-    return writes
+    return erases + writes + records + [(0xE000, b"\xff" * 8192)]
 
 
 def execute(args):
@@ -223,7 +223,8 @@ def execute(args):
             ]
             if args.operation in ("install", "restore"):
                 command.append("--erase-all")
-            for address, file in sorted(files):
+            # esptool writes in the order given, which is the order plan() needs.
+            for address, file in files:
                 command.extend([hex(address), str(file)])
             # The stub is already running on `esp`; tell esptool.main not to
             # upload it a second time (overlapping RAM raises FatalError).

@@ -111,14 +111,15 @@ export async function program(
       );
     }
   }
-  const files = planned.map(({ image }) => ({
-    address: image.offset,
-    data: assets.get(image.file)!,
-  }));
+  // Settings are erased before any image and version records are written
+  // last, so an interrupted downgrade still reads as the newer version and
+  // asks to erase again.
+  const erases: { address: number; data: Uint8Array }[] = [];
+  const records: { address: number; data: Uint8Array }[] = [];
   for (const app of APPS) {
     if (op !== "install" && op !== app) continue;
     const target = selectApp(release, app, versions[app]);
-    files.push({
+    records.push({
       address: recordOffset(id, app),
       data: appRecord(app, target.version, target.sha256),
     });
@@ -135,11 +136,19 @@ export async function program(
     if (eraseSettings)
       for (const name of SETTINGS[app]) {
         const { offset, size } = partition(id, name);
-        files.push({ address: offset, data: new Uint8Array(size).fill(255) });
+        erases.push({ address: offset, data: new Uint8Array(size).fill(255) });
       }
   }
-  // Erased OTA metadata returns to the factory selector after a USB operation.
-  files.push({ address: 0xe000, data: new Uint8Array(8192).fill(255) });
+  const files = [
+    ...erases,
+    ...planned.map(({ image }) => ({
+      address: image.offset,
+      data: assets.get(image.file)!,
+    })),
+    ...records,
+    // Erased OTA metadata returns to the factory selector after a USB operation.
+    { address: 0xe000, data: new Uint8Array(8192).fill(255) },
+  ];
   await device.write(files, op === "install");
 }
 export class UsbDevice implements Device {
@@ -234,9 +243,18 @@ export class UsbDevice implements Device {
     }
   }
   async read(address: number, size: number) {
-    return this.loader.readFlash(address, size, (_packet, read, total) =>
-      this.progress((read / total) * 100),
+    const data = await this.loader.readFlash(
+      address,
+      size,
+      (_packet, read, total) => this.progress((read / total) * 100),
     );
+    // Unlike esptool.py, esptool-js does not check the stub's digest of a read.
+    requireCondition(
+      (await this.loader.flashMd5sum(address, size)).toLowerCase() ===
+        md5hex(data),
+      "Flash read was corrupted over USB. Retry.",
+    );
+    return data;
   }
   async write(
     files: { address: number; data: Uint8Array }[],
@@ -251,10 +269,11 @@ export class UsbDevice implements Device {
       flashMode: "keep",
       flashFreq: "keep",
       calculateMD5Hash: md5hex,
-      reportProgress: (index, written) =>
+      // written and size count this file's compressed bytes.
+      reportProgress: (index, written, size) =>
         this.progress(
           ((files.slice(0, index).reduce((sum, f) => sum + f.data.length, 0) +
-            written) /
+            (written / size) * files[index].data.length) /
             total) *
             100,
         ),

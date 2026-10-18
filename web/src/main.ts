@@ -78,11 +78,15 @@ function populateBoards() {
 function populateVersions() {
   for (const app of APPS) {
     const select = versionSelect(app);
-    select.replaceChildren(
-      ...(selectedRelease()?.apps[app] ?? []).map(
-        ({ version }) => new Option(version, version),
-      ),
+    const previous = select.value;
+    const versions = (selectedRelease()?.apps[app] ?? []).map(
+      ({ version }) => version,
     );
+    select.replaceChildren(
+      ...versions.map((version) => new Option(version, version)),
+    );
+    // Keep the chosen version when only the board list was rebuilt.
+    if (versions.includes(previous)) select.value = previous;
   }
 }
 const board = el<HTMLInputElement>("board"),
@@ -346,8 +350,6 @@ el("run").onclick = () =>
         eraseSettings.checked,
       );
     }
-    // The device may have disconnected; otherwise show what is now installed.
-    if (device) installed = (await inspect(device, device.board)).installed;
     const done =
       op === "backup"
         ? "Backup downloaded."
@@ -356,6 +358,17 @@ el("run").onclick = () =>
     log(done);
     el<HTMLInputElement>("confirmation").checked = false;
     eraseSettings.checked = false;
+    // The device may have disconnected; otherwise show what is now installed.
+    // The operation already succeeded, so a failed read must not report it failed.
+    if (device)
+      try {
+        installed = (await inspect(device, device.board)).installed;
+      } catch (error) {
+        installed = {};
+        log(
+          `Could not read the installed versions: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
   });
 el("logs").onclick = () =>
   download(

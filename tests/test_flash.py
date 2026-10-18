@@ -210,7 +210,7 @@ class FlashTests(unittest.TestCase):
         writes = plan(m, V4, "install", lambda a, n: self.fail("Install must not require a layout"))
         self.assertEqual(
             [offset for offset, _ in writes],
-            [0x100000, 0x3FF000, 0x400000, 0x9FF000, 0x10000, 0x8000, 0, 0xE000],
+            [0x100000, 0x400000, 0x10000, 0x8000, 0, 0x3FF000, 0x9FF000, 0xE000],
         )
         self.assertEqual(writes[0][1]["version"], "companion-v1.17.1", "defaults to newest")
 
@@ -242,6 +242,17 @@ class FlashTests(unittest.TestCase):
                 erased[partition(V4, name)["offset"]], b"\xff" * partition(V4, name)["size"]
             )
         self.assertNotIn(partition(V4, "mt_nvs")["offset"], erased)
+        # Erase first and record last, so an interrupted downgrade asks to erase again.
+        self.assertEqual(
+            [offset for offset, _ in downgrade],
+            [
+                partition(V4, "mc_nvs")["offset"],
+                partition(V4, "mc_fs")["offset"],
+                0x100000,
+                record_offset(V4, "meshcore"),
+                0xE000,
+            ],
+        )
         self.assertEqual(
             installed_version(V4, "meshcore", erased[record_offset(V4, "meshcore")]),
             "companion-v1.16.0",
@@ -294,7 +305,7 @@ class FlashTests(unittest.TestCase):
         writes = plan(m, V3, "install", lambda a, n: self.fail("Install must not read"))
         self.assertEqual(
             [offset for offset, _ in writes],
-            [0x60000, 0x25F000, 0x260000, 0x55F000, 0x10000, 0x8000, 0, 0xE000],
+            [0x60000, 0x260000, 0x10000, 0x8000, 0, 0x25F000, 0x55F000, 0xE000],
         )
         self.assertEqual(writes[0][1]["file"], "heltec-v3-meshcore-companion-v1.17.1.bin")
         # A V3 without a version record cannot be identified, so updates erase settings.
