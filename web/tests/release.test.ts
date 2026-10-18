@@ -70,3 +70,12 @@ it("accepts every actual packaged image and preflights every supported write ope
       }
   }
 });
+
+it("loads the built flasher's files relative to the page", () => {
+  // GitHub Pages serves the flasher from /coretastic/, not the site root.
+  const page = readFileSync(
+    resolve(import.meta.dirname, "../dist/index.html"),
+    "utf8",
+  );
+  expect(page).not.toMatch(/(?:src|href)="\/(?!\/)/);
+});
