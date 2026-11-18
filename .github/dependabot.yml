@@ -1,0 +1,41 @@
+# Version updates run weekly; security updates open as soon as an advisory
+# lands, whatever the schedule.
+#
+# The groups below apply to version updates only, so each security update gets
+# its own pull request. With every advisory in an ecosystem put in one group,
+# an open group pull request held back each later advisory in that ecosystem,
+# and those advisories never got a pull request.
+#
+# Git submodules are left to the upstream sync workflow, which also updates
+# upstream-lock.json and builds every board.
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      pip-minor-and-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /web
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      web-minor-and-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      github-actions:
+        patterns: ["*"]
