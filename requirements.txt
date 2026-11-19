@@ -2,7 +2,7 @@ ajsonrpc==1.2.0
 anyio==4.16.0
 argcomplete==3.7.2
 bitarray==3.12.3
-bitstring==4.4.0
+bitstring==5.0.0
 bottle==0.13.4
 certifi==2026.10.23
 cffi==2.1.1
